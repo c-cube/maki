@@ -68,8 +68,9 @@ val close_async : (_,_) t -> unit
 val wait : (_,_) t -> unit Lwt.t
 (** Evaluates once the pipe closes *)
 
-val create : ?on_close:(unit -> unit Lwt.t) -> ?max_size:int -> unit -> ('a, 'perm) t
+val create : ?on_close:(unit -> unit) -> ?max_size:int -> unit -> ('a, 'perm) t
 (** Create a new pipe.
+    @param on_close called when the pipe is closed
     @param max_size size of internal buffer. Default 0. *)
 
 val connect : ?ownership:[`None | `InOwnsOut | `OutOwnsIn] ->

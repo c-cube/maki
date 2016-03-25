@@ -54,8 +54,12 @@ type ('a, +'perm) t = {
 
 type ('a, 'perm) pipe = ('a, 'perm) t
 
-let create ?(max_size=0) () =
+let create ?on_close ?(max_size=0) () =
   let closed, close = Lwt.wait () in
+  begin match on_close with
+    | None -> ()
+    | Some f -> Lwt.on_success closed f
+  end;
   {
     close;
     closed;
@@ -74,6 +78,8 @@ let close p =
   if is_closed p then Lwt.return_unit
   else (
     Lwt.wakeup p.close (); (* evaluate *)
+    Queue.iter (fun r -> Lwt.wakeup r End) p.readers;
+    Queue.iter (fun (_,r) -> Lwt.wakeup r ()) p.blocked_writers;
     Lwt.join p.keep;
   )
 
