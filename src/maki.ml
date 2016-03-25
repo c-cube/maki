@@ -50,7 +50,7 @@ module Value = struct
       | b -> expected_b "int" b
       );
   }
- 
+
   let string = {
     descr="string";
     serialize=(fun s -> Bencode.String s);
@@ -80,7 +80,7 @@ module Value = struct
   exception ExitUn of string
 
   let map_res_l f l =
-    try 
+    try
       let res =
         List.map
         (fun x -> match f x with Ok y -> y | Error s -> raise (ExitUn s))
@@ -129,56 +129,27 @@ end
 
 (** {2 Controlling Parallelism} *)
 
-module J = struct
-  let j_ = ref 1
+module Limit = struct
+  type t = unit Lwt_pool.t
 
-  let get () = !j_
-  let set n =
-    if n<1 then invalid_arg "J.set";
-    j_ := n
+  let create size = Lwt_pool.create size (fun () -> Lwt.return_unit)
+
+  let acquire = Lwt_pool.use
+
+  let j_init = ref 1
 
   (* pool used to limit concurrent access to cores, memory, etc. *)
-  let pool_ =
-    lazy (Lwt_pool.create !j_ (fun () -> Lwt.return_unit))
+  let j_ = lazy (create !j_init)
 
-  let acquire f = Lwt_pool.use (Lazy.force pool_) f
+  let j () = Lazy.force j_
+
+  let set_j n =
+    if Lazy.is_val j_ then failwith "Limit.set_j: too late to set limit";
+    j_init := n
 end
 
 (** {2 On-Disk storage} *)
-module Storage = struct
-  type t = {
-    name: string;
-    get: string -> string or_error;
-    set: string -> string -> unit or_error;
-    iter: unit -> (string * string, [`r]) Maki_pipe.t;
-  }
-
-  let env_var_ = "MAKI_DIR"
-
-  (* TODO *)
-
-  let default_get ~dir k = assert false
-  let default_set ~dir k v = assert false
-  let default_iter ~dir () = assert false
-
-  let default ?dir () =
-    let dir = match dir with
-      | Some d -> d
-      | None ->
-        try Sys.getenv env_var_
-        with Not_found ->
-          ".maki/"
-    in
-    { name="shelf";
-      get=default_get ~dir;
-      set=default_set ~dir;
-      iter=default_iter ~dir;
-    }
-
-  let storage_ = ref (default ())
-  let set s = storage_ := s
-  let cur () = !storage_
-end
+module Storage = Maki_storage
 
 (** {2 Memoized Functions} *)
 
@@ -187,15 +158,24 @@ let abspath f =
   then Filename.concat (Sys.getcwd()) f
   else f
 
-let sha1_of_string s = Sha1.string s |> Sha1.to_hex
+let sha1_of_string s = Sha1.string s
 
+(* number of threads to use in parallel for computing Sha1 *)
+let sha1_pool_ = Limit.create 6
+
+(* fast sha1 on a file *)
 let sha1 f =
-  assert false (* TODO: open file, allocate buffer, use Sha1... maybe use mmap? *)
+  Limit.acquire sha1_pool_
+    (fun () -> Lwt_preemptive.detach Sha1.file_fast f)
 
-let last_mtime f = assert false (* TODO *)
+let last_mtime f =
+  try
+    let s = Unix.stat f in
+    Ok s.Unix.st_mtime
+  with e -> Error (Printexc.to_string e)
 
 let call
-    ?(storage=Storage.cur ())
+    ?(storage=Storage.get_default ())
     ~name
     ~deps
     ~op

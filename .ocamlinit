@@ -1,5 +1,6 @@
 #use "topfind";;
 #require "lwt.unix";;
+#require "lwt.preemptive";;
 #require "sha";;
 #require "bencode";;
 #require "result";;

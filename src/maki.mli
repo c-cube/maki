@@ -57,30 +57,21 @@ end
     We use a generic interface for on-disk storage, in the form of a
     dictionary [string -> string]. The default storage just uses
     one file per pair. *)
-module Storage : sig
-  type t = {
-    name: string;
-    get: string -> string or_error;
-    set: string -> string -> unit or_error;
-    iter: unit -> (string * string, [`r]) Maki_pipe.t;
-  }
-
-  val default : ?dir:path -> unit -> t
-  (** [default ?dir ()] creates a new default storage (one file per pair)
-      @param dir if provided, set the directory used for storing files
-      if [dir] is not set, then the current directory is used, unless the
-        environment variable "MAKI_DIR" is set *)
-
-  val set : t -> unit
-  (** Change the storage that is used to evaluate every Maki function *)
-end
+module Storage = Maki_storage
 
 (** {2 Controlling Parallelism} *)
 
-module J : sig
-  val set : int -> unit
-  val get : unit -> int
-  val acquire : (unit -> 'a Lwt.t) -> 'a Lwt.t
+module Limit : sig
+  type t
+  val create : int -> t
+  val acquire : t -> (unit -> 'a Lwt.t) -> 'a Lwt.t
+
+  val j : unit -> t
+  (** Default limiter for concurrency, shoudl be set by CLI options *)
+
+  val set_j : int -> unit
+  (** Should be called at the beginning to set the value of [j].
+      @raise Failure if [j] is already evaluated *)
 end
 
 (** {2 Memoized Functions}
@@ -111,13 +102,13 @@ val call :
 
 (** {2 Utils} *)
 
-val last_mtime : path -> float Lwt.t
+val last_mtime : path -> float or_error
 (** Last modification time of the file *)
 
-val sha1 : path -> string Lwt.t
+val sha1 : path -> Sha1.t Lwt.t
 (** [sha1 f] hashes the file [f] *)
 
-val sha1_of_string : string -> string
+val sha1_of_string : string -> Sha1.t
 (** hash the given string *)
 
 val abspath : path -> path
