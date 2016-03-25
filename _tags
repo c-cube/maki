@@ -1,0 +1,5 @@
+# OASIS_START
+# OASIS_STOP
+
+<src/**>: warn(+a-4-44)
+true: no_alias_deps, safe_string, short_paths
