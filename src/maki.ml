@@ -4,6 +4,7 @@
 (** {1 Maki: Persistent Incremental Computations} *)
 
 open Result
+open Lwt.Infix
 
 module B = Bencode
 
@@ -165,7 +166,8 @@ module Storage = struct
       | Some d -> d
       | None ->
         try Sys.getenv env_var_
-        with Not_found -> "."
+        with Not_found ->
+          ".maki/"
     in
     { name="shelf";
       get=default_get ~dir;
@@ -180,6 +182,18 @@ end
 
 (** {2 Memoized Functions} *)
 
+let abspath f =
+  if Filename.is_relative f
+  then Filename.concat (Sys.getcwd()) f
+  else f
+
+let sha1_of_string s = Sha1.string s |> Sha1.to_hex
+
+let sha1 f =
+  assert false (* TODO: open file, allocate buffer, use Sha1... maybe use mmap? *)
+
+let last_mtime f = assert false (* TODO *)
+
 let call
     ?(storage=Storage.cur ())
     ~name
@@ -188,3 +202,28 @@ let call
     f
   =
   assert false (* TODO *)
+
+let shell ?timeout ?(stdin="") cmd =
+  let cmd = "sh", [|"sh"; "-c"; cmd|] in
+  Lwt_process.with_process_full ?timeout cmd
+    (fun p ->
+       Lwt_io.write p#stdin stdin >>= fun () ->
+       Lwt_io.flush p#stdin >>= fun () ->
+       let stdout = Lwt_io.read p#stdout
+       and stderr = Lwt_io.read p#stderr
+       and errcode = p#status
+       and close_in = Lwt_io.close p#stdin in
+       stdout >>= fun o ->
+       stderr >>= fun e ->
+       errcode >>= fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) ->
+       close_in >>= fun _ ->
+       Lwt.return (o, e, c))
+
+let shellf ?timeout ?stdin cmd =
+  let buf = Buffer.create 64 in
+  let fmt = Format.formatter_of_buffer buf in
+  Format.kfprintf
+    (fun _ ->
+       Format.pp_print_flush fmt ();
+       shell ?timeout ?stdin (Buffer.contents buf))
+    fmt cmd

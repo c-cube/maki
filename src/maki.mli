@@ -109,4 +109,30 @@ val call :
   (unit -> 'res Lwt.t) ->
   'res Lwt.t
 
+(** {2 Utils} *)
+
+val last_mtime : path -> float Lwt.t
+(** Last modification time of the file *)
+
+val sha1 : path -> string Lwt.t
+(** [sha1 f] hashes the file [f] *)
+
+val sha1_of_string : string -> string
+(** hash the given string *)
+
+val abspath : path -> path
+(** Make the path absolute *)
+
+val shell :
+  ?timeout:float -> ?stdin:string ->
+  string -> (string * string * int) Lwt.t
+(** [shell cmd] runs the command [cmd] and
+    returns [stdout, sterr, errcode].
+    @param stdin optional input to the sub-process *)
+
+val shellf :
+  ?timeout:float -> ?stdin:string ->
+  ('a, Format.formatter, unit, (string * string * int) Lwt.t) format4 -> 'a
+(** Same as {!shell} but with a format string. Careful with escaping! *)
+
 
