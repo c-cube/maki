@@ -2,4 +2,6 @@ S src
 B _build/src/**
 PKG lwt.unix
 PKG sha
+PKG result
+PKG bencode
 FLG -w +a-4-44
