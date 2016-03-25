@@ -88,20 +88,23 @@ module Default = struct
   let iter t ?(preload=16) () =
     let module P = Maki_pipe in
     let d = Unix.opendir t.dir in
-    let pipe = P.create ~max_size:preload () in
+    let pipe =
+      P.create ~on_close:(fun () -> Unix.closedir d) ~max_size:preload () in
     (* push directory entries into [pipe] *)
     let rec push pipe dir =
       match Unix.readdir dir with
       | k ->
-          if Sys.is_directory k
-          then Lwt.return_unit (* ignore directories *)
-          else (
-            read_file_ k >>= fun value ->
-            P.write pipe (k,value)
-          ) >>= fun () ->
+        let f = k_to_file t k in
+        if Sys.is_directory f
+        then push pipe dir (* ignore directories *)
+        else (
+          read_file_ f >>= fun value ->
+          P.write pipe (k,value) >>= fun () ->
           push pipe dir
+        )
       | exception (Unix.Unix_error _ as e) ->
-          P.write_error pipe (Printexc.to_string e)
+        P.write_error pipe (Printexc.to_string e) >>= fun () ->
+        P.close pipe
       | exception End_of_file -> P.close pipe
     in
     Lwt.async (fun () -> push pipe d);
