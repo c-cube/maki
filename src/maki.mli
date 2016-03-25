@@ -1,7 +1,17 @@
 
 (* This file is free software. See file "license" for more details. *)
 
-(** {1 Maki: Persistent Incremental Computations} *)
+(** {1 Maki: Persistent Incremental Computations}
+
+    Maki is a system for memoizing costly OCaml functions using the disk.
+    It requires the functions to be {b pure}, that is, to always return
+    the same result given that the set of {b dependencies} declared by
+    the function doesn't change.
+
+    {b status: experimental}
+
+    This module is not thread-safe.
+*)
 
 type 'a or_error = ('a, string) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
@@ -11,53 +21,7 @@ type ('a,'rw) pipe = ('a,'rw) Maki_pipe.t
 
 type path = string
 type program = string
-
-(** {2 Values}
-
-    Maki deals with functions that take and return values of any
-    type that provides a {!'a Value.t} implementation;
-    that is, values that we can serialize, unserialize, and hash.
-    The reason is that values are stored on disk for memoization purposes. *)
-module Value : sig
-  type 'a ops = {
-    descr: string; (* description of 'a *)
-    serialize : 'a -> Bencode.t;
-    unserialize : Bencode.t -> 'a or_error;
-  }
-  (* TODO: also explain how to hash/compare values
-     (e.g. with a to_string_canon function, which, for files, will
-     be the hash of the content) *)
-
-  type t = Value : 'a ops * 'a -> t
-  (** Universal type, can be hashed, serialized, etc. *)
-
-  val int : int ops
-  val string : string ops
-  val bool : bool ops
-  val list : 'a ops -> 'a list ops
-  val assoc : 'a ops -> (string * 'a) list ops
-
-  val file : path ops
-  (** A {b reference} to some file content. This should be compared by
-      hash of the file content *)
-
-  val pair : 'a ops -> 'b ops -> ('a * 'b) ops
-  val triple : 'a ops -> 'b ops -> 'c ops -> ('a * 'b * 'c) ops
-  val quad : 'a ops -> 'b ops -> 'c ops -> 'd ops -> ('a * 'b * 'c * 'd) ops
-
-  val serialize : 'a ops -> 'a -> Bencode.t
-  val unserialize : 'a ops -> Bencode.t -> 'a or_error
-  val to_string : 'a ops -> 'a -> string
-  val of_string : 'a ops -> string -> 'a or_error
-  val pack : 'a ops -> 'a -> t
-end
-
-(** {2 On-Disk storage}
-
-    We use a generic interface for on-disk storage, in the form of a
-    dictionary [string -> string]. The default storage just uses
-    one file per pair. *)
-module Storage = Maki_storage
+type time = float
 
 (** {2 Controlling Parallelism} *)
 
@@ -73,6 +37,71 @@ module Limit : sig
   (** Should be called at the beginning to set the value of [j].
       @raise Failure if [j] is already evaluated *)
 end
+
+(** {2 Values}
+
+    Maki deals with functions that take and return values of any
+    type that provides a {!'a Value.t} implementation;
+    that is, values that we can serialize, unserialize, and hash.
+    The reason is that values are stored on disk for memoization purposes. *)
+module Value : sig
+  type 'a ops = {
+    descr: string; (* description of 'a *)
+    serialize : 'a -> Bencode.t;
+    unserialize : Bencode.t -> 'a or_error;
+    timestamp: ('a -> time) option;
+      (* last time the value was modified *)
+    canonical_form : ('a -> string Lwt.t) option;
+      (* unique representation of ['a]. If absent, the bencode
+         encoding of [serialize] is used *)
+  }
+  (* ['a ops] describes how to use values of type ['a] as memoized values.
+     A value must be serializable, unserializable, and
+     it should have a conversion to a {b unique} string; two values that
+     have the same canonical form (the string) are considered equal
+     w.r.t. caching and recomputations. *)
+
+  val make :
+    ?timestamp:('a -> time) ->
+    ?canonical_form:('a -> string Lwt.t) ->
+    serialize:('a -> Bencode.t) ->
+    unserialize:(Bencode.t -> 'a or_error) ->
+    string -> 'a ops
+
+  val serialize : 'a ops -> 'a -> Bencode.t
+  val unserialize : 'a ops -> Bencode.t -> 'a or_error
+  val to_string : 'a ops -> 'a -> string
+  val of_string : 'a ops -> string -> 'a or_error
+  val canonical_form : 'a ops -> 'a -> string Lwt.t
+  val last_timestamp : 'a ops -> 'a -> time option
+
+  val int : int ops
+  val string : string ops
+  val bool : bool ops
+  val list : 'a ops -> 'a list ops
+  val assoc : 'a ops -> (string * 'a) list ops
+
+  val file : path ops
+  (** A {b reference} to some file content. This should be compared by
+      hash of the file content *)
+
+  val pair : 'a ops -> 'b ops -> ('a * 'b) ops
+  val triple : 'a ops -> 'b ops -> 'c ops -> ('a * 'b * 'c) ops
+  val quad : 'a ops -> 'b ops -> 'c ops -> 'd ops -> ('a * 'b * 'c * 'd) ops
+
+  (** {6 Universal type for Values} *)
+
+  type t = Value : 'a ops * 'a -> t
+
+  val pack : 'a ops -> 'a -> t
+end
+
+(** {2 On-Disk storage}
+
+    We use a generic interface for on-disk storage, in the form of a
+    dictionary [string -> string]. The default storage just uses
+    one file per pair. *)
+module Storage = Maki_storage
 
 (** {2 Memoized Functions}
 
@@ -102,7 +131,7 @@ val call :
 
 (** {2 Utils} *)
 
-val last_mtime : path -> float or_error
+val last_mtime : path -> time or_error
 (** Last modification time of the file *)
 
 val sha1 : path -> Sha1.t Lwt.t
