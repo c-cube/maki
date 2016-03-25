@@ -60,7 +60,7 @@ val is_closed : (_,_) t -> bool
 
 val close : (_,_) t -> unit Lwt.t
 (** [close p] closes [p], which will not accept input anymore.
-    This sends [`End] to all readers connected to [p] *)
+    This sends [End] to all readers connected to [p] *)
 
 val close_async : (_,_) t -> unit
 (** Same as {!close} but closes in the background *)
@@ -68,7 +68,7 @@ val close_async : (_,_) t -> unit
 val wait : (_,_) t -> unit Lwt.t
 (** Evaluates once the pipe closes *)
 
-val create : ?max_size:int -> unit -> ('a, 'perm) t
+val create : ?on_close:(unit -> unit Lwt.t) -> ?max_size:int -> unit -> ('a, 'perm) t
 (** Create a new pipe.
     @param max_size size of internal buffer. Default 0. *)
 

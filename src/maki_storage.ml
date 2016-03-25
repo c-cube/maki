@@ -93,9 +93,15 @@ module Default = struct
     let rec push pipe dir =
       match Unix.readdir dir with
       | k ->
-          read_file_ k >>= fun value ->
-          P.write pipe (k,value) >>= fun () ->
+          if Sys.is_directory k
+          then Lwt.return_unit (* ignore directories *)
+          else (
+            read_file_ k >>= fun value ->
+            P.write pipe (k,value)
+          ) >>= fun () ->
           push pipe dir
+      | exception (Unix.Unix_error _ as e) ->
+          P.write_error pipe (Printexc.to_string e)
       | exception End_of_file -> P.close pipe
     in
     Lwt.async (fun () -> push pipe d);
