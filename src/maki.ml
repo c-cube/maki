@@ -8,6 +8,11 @@ open Lwt.Infix
 
 module B = Bencode
 
+module LwtErr = Maki_lwt_err
+
+let (>>>=) = LwtErr.(>>=)
+let (>>|=) = LwtErr.(>|=)
+
 type 'a or_error = ('a, string) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
 type ('a,'rw) pipe = ('a,'rw) Maki_pipe.t
@@ -38,6 +43,10 @@ module Res_ = struct
     with ExitUn s -> Error s
 end
 
+let decode_bencode s =
+  try Ok (B.decode (`String s))
+  with _ -> Error (s ^ " is not valid Bencode")
+
 (** {2 Controlling Parallelism} *)
 
 module Limit = struct
@@ -65,7 +74,7 @@ type path = string
 type program = string
 type time = float
 
-(** {2 helpers} *)
+(** {2 Utils} *)
 
 let last_time_ f =
   let s = Unix.stat f in
@@ -78,6 +87,42 @@ let sha1_pool_ = Limit.create 6
 let sha1 f =
   Limit.acquire sha1_pool_
     (fun () -> Lwt_preemptive.detach Sha1.file_fast f)
+
+let abspath f =
+  if Filename.is_relative f
+  then Filename.concat (Sys.getcwd()) f
+  else f
+
+let sha1_of_string s = Sha1.string s
+
+let last_mtime f : time or_error =
+  try Ok (last_time_ f)
+  with e -> Error (Printexc.to_string e)
+
+let shell ?timeout ?(stdin="") cmd =
+  let cmd = "sh", [|"sh"; "-c"; cmd|] in
+  Lwt_process.with_process_full ?timeout cmd
+    (fun p ->
+       Lwt_io.write p#stdin stdin >>= fun () ->
+       Lwt_io.flush p#stdin >>= fun () ->
+       let stdout = Lwt_io.read p#stdout
+       and stderr = Lwt_io.read p#stderr
+       and errcode = p#status
+       and close_in = Lwt_io.close p#stdin in
+       stdout >>= fun o ->
+       stderr >>= fun e ->
+       errcode >>= fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) ->
+       close_in >>= fun _ ->
+       Lwt.return (o, e, c))
+
+let shellf ?timeout ?stdin cmd =
+  let buf = Buffer.create 64 in
+  let fmt = Format.formatter_of_buffer buf in
+  Format.kfprintf
+    (fun _ ->
+       Format.pp_print_flush fmt ();
+       shell ?timeout ?stdin (Buffer.contents buf))
+    fmt cmd
 
 (** {2 Values} *)
 module Value = struct
@@ -205,10 +250,8 @@ module Value = struct
   let to_string op x = B.encode_to_string (serialize op x)
 
   let of_string op s =
-    try
-      let b = B.decode (`String s) in
-      unserialize op b
-    with e -> Error (Printexc.to_string e)
+    let open Res_ in
+    decode_bencode s >>= unserialize op
 
   let last_timestamp op x =
     match op.timestamp with
@@ -220,7 +263,25 @@ module Value = struct
     | None -> Lwt.return @@ to_string op x
     | Some f -> f x
 
+  let compare op a b =
+    String.compare (to_string op a) (to_string op b)
+
+  let set op =
+    let descr = Printf.sprintf "(set %s)" op.descr in
+    make descr
+      ~serialize:(fun l ->
+          let l = List.sort (compare op) l in
+          B.List (List.map op.serialize l))
+      ~unserialize:(function
+          | B.List l -> Res_.map_l op.unserialize l
+          | b -> expected_b descr b)
+
   let pack op x = Value (op,x)
+  let pack_int = pack int
+  let pack_bool = pack bool
+  let pack_string = pack string
+
+  let to_string_packed (Value (op,x)) = to_string op x
 end
 
 (** {2 On-Disk storage} *)
@@ -228,58 +289,119 @@ module Storage = Maki_storage
 
 (** {2 Memoized Functions} *)
 
-let abspath f =
-  if Filename.is_relative f
-  then Filename.concat (Sys.getcwd()) f
-  else f
-
-let sha1_of_string s = Sha1.string s
-
-let last_mtime f : time or_error =
-  try Ok (last_time_ f)
-  with e -> Error (Printexc.to_string e)
-
 (* state for evaluating memoized functions *)
-type loc_state = {
-  file_cache: (path, time * Sha1.t) Hashtbl.t;
-    (* cache for file status *)
+type state = {
+  cache: (string, time option * Sha1.t) Hashtbl.t;
+    (* cache from canonical repr to last state *)
 }
 
 (* global variable containing the current state *)
 let state_ = {
-  file_cache = Hashtbl.create 128;
+  cache = Hashtbl.create 128;
 }
 
+type lifetime =
+  | Keep
+  | KeepUntil of time
+  | CanDrop
+
+let bencode_of_lifetime = function
+  | Keep -> B.String "keep"
+  | KeepUntil t -> B.List [B.String "keep_until"; B.String (string_of_float t)]
+  | CanDrop -> B.String "drop"
+
+let lifetime_of_bencode = function
+  | B.String "keep" -> Ok Keep
+  | B.List [B.String "keep_until"; B.String t] ->
+    begin try Ok (KeepUntil (float_of_string t))
+      with _ -> Error "expected timestamp"
+    end
+  | B.String "drop" -> Ok CanDrop
+  | _ -> Error "expected lifetime"
+
+type cache_value = {
+  cv_lifetime: lifetime;
+  cv_deps: string list; (* dependencies used to compute this value *)
+  cv_data: string;
+}
+
+(* serialize [c] into Bencode *)
+let bencode_of_cache_value c =
+  B.Dict
+    [ "lifetime", bencode_of_lifetime c.cv_lifetime
+    ; "deps", B.List (List.map (fun s->B.String s) c.cv_deps)
+    ; "data", B.String c.cv_data
+    ]
+
+let assoc_ k l =
+  try Ok (List.assoc k l)
+  with _ -> Error ("could not find key " ^ k)
+
+let as_str_ = function
+  | B.String s -> Ok s
+  | _ -> Error "expected string"
+
+let as_list_ = function
+  | B.List l -> Ok l
+  | _ -> Error "expected list"
+
+(* [s] is a serialized cached value, turn it into a [cache_value] *)
+let cache_value_of_string s : cache_value or_error =
+  let open Res_ in
+  decode_bencode s >>= fun b ->
+  match b with
+    | B.Dict l ->
+      let open Res_ in
+      assoc_ "lifetime" l >>= lifetime_of_bencode >>= fun cv_lifetime ->
+      assoc_ "deps" l >>= as_list_ >>= map_l as_str_ >>= fun cv_deps ->
+      assoc_ "data" l >>= as_str_ >>= fun cv_data ->
+      return {cv_data; cv_deps; cv_lifetime}
+    | _ -> Error "expected cache_value"
+
+(* compute the hash of the result of computing the application of
+   the function named [fun_name] on dependencies [l] *)
+let compute_name fun_name l =
+  let l =
+    List.map (fun (Value.Value (op,x)) -> B.String (Value.to_string op x)) l in
+  let b = B.List (B.String fun_name :: l) in
+  B.encode_to_string b
+
+(*
+   - compute a string [s] out of computation and dependencies [to_string]
+   - compute the content's hash (canonical form) of dependencies,
+     OR use the cache if timestamp didn't change
+   - compute the hash [h] of [s [hash(dep1), ..., [hash depn]]]
+   - check if file named [h] exists
+     * if it does, read its content, deserialize result with [op] and return it
+     * otherwise, compute result, write it in [h], and return it
+*)
 let call
-    ?(storage=Storage.get_default ())
-    ~name
-    ~deps
-    ~op
-    f
+?(storage=Storage.get_default ())
+?(lifetime=CanDrop)
+~name:fun_name
+~deps
+~op
+f
   =
-  assert false (* TODO *)
-
-let shell ?timeout ?(stdin="") cmd =
-  let cmd = "sh", [|"sh"; "-c"; cmd|] in
-  Lwt_process.with_process_full ?timeout cmd
-    (fun p ->
-       Lwt_io.write p#stdin stdin >>= fun () ->
-       Lwt_io.flush p#stdin >>= fun () ->
-       let stdout = Lwt_io.read p#stdout
-       and stderr = Lwt_io.read p#stderr
-       and errcode = p#status
-       and close_in = Lwt_io.close p#stdin in
-       stdout >>= fun o ->
-       stderr >>= fun e ->
-       errcode >>= fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) ->
-       close_in >>= fun _ ->
-       Lwt.return (o, e, c))
-
-let shellf ?timeout ?stdin cmd =
-  let buf = Buffer.create 64 in
-  let fmt = Format.formatter_of_buffer buf in
-  Format.kfprintf
-    (fun _ ->
-       Format.pp_print_flush fmt ();
-       shell ?timeout ?stdin (Buffer.contents buf))
-    fmt cmd
+  let computation_name = compute_name fun_name deps in
+  let h_computation_name = Sha1.string computation_name |> Sha1.to_hex in
+  (* check cache *)
+  Storage.get storage h_computation_name >>>=
+  function
+  | None ->
+    (* not in cache, perform computation *)
+    f () >>= fun res ->
+    let cv_data = Value.to_string op res in
+    let cv_deps = List.map Value.to_string_packed deps in
+    let cv = {cv_lifetime=lifetime; cv_deps; cv_data} in
+    Storage.set storage h_computation_name
+      (bencode_of_cache_value cv |> B.encode_to_string)
+    >>>= fun () ->
+    Lwt.return (Ok res)
+  | Some s ->
+    let res = Res_.(
+      cache_value_of_string s >>= fun cv ->
+      (* TODO: if cv.cv_lifetime = KeepUntil, refresh timestamp *)
+      Value.of_string op cv.cv_data
+    ) in
+    Lwt.return res

@@ -75,6 +75,9 @@ module Value : sig
   val canonical_form : 'a ops -> 'a -> string Lwt.t
   val last_timestamp : 'a ops -> 'a -> time option
 
+  val compare : 'a ops -> 'a -> 'a -> int
+  (** [compare ops a b] compares [a] and [b], using the {b to_string} form *)
+
   val int : int ops
   val string : string ops
   val bool : bool ops
@@ -85,6 +88,10 @@ module Value : sig
   (** A {b reference} to some file content. This should be compared by
       hash of the file content *)
 
+  val set : 'a ops -> 'a list ops
+  (** [set op] is similar to {!list}, except the order of elements does
+      not matter. *)
+
   val pair : 'a ops -> 'b ops -> ('a * 'b) ops
   val triple : 'a ops -> 'b ops -> 'c ops -> ('a * 'b * 'c) ops
   val quad : 'a ops -> 'b ops -> 'c ops -> 'd ops -> ('a * 'b * 'c * 'd) ops
@@ -94,6 +101,9 @@ module Value : sig
   type t = Value : 'a ops * 'a -> t
 
   val pack : 'a ops -> 'a -> t
+  val pack_int : int -> t
+  val pack_string : string -> t
+  val pack_bool : bool -> t
 end
 
 (** {2 On-Disk storage}
@@ -121,13 +131,23 @@ module Storage = Maki_storage
     unpredictable.
 *)
 
+(** lifetime for a cached value *)
+type lifetime =
+  | Keep
+  | KeepUntil of time
+  | CanDrop
+
 val call :
   ?storage:Storage.t ->
+  ?lifetime:lifetime ->
   name:string ->
   deps:Value.t list ->
   op:'res Value.ops ->
   (unit -> 'res Lwt.t) ->
-  'res Lwt.t
+  'res or_error Lwt.t
+(** Call the function iff its result has not been cached yet
+    @param lifetime how long to keep the cached value (defautl: CanDrop)
+*)
 
 (** {2 Utils} *)
 
