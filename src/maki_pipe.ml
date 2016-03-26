@@ -10,29 +10,7 @@ type 'a step =
   | Yield of 'a or_error
   | End
 
-module LwtErr = struct
-  type 'a t = 'a or_error Lwt.t
-
-  let return x = Lwt.return (Ok x)
-
-  let return_unit = Lwt.return (Ok ())
-
-  let fail msg = Lwt.return (Error msg)
-
-  let (>>=) x f =
-    Lwt.bind x
-      (function
-        | Error msg -> fail msg
-        | Ok y -> f y
-      )
-
-  let (>|=) x f =
-    Lwt.map
-      (function
-        | Error _ as e -> e
-        | Ok x -> Ok (f x)
-      ) x
-end
+module LwtErr = Maki_lwt_err
 
 let (>>>=) = LwtErr.(>>=)
 let (>>|=) = LwtErr.(>|=)
