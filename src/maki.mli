@@ -13,7 +13,7 @@
     This module is not thread-safe.
 *)
 
-type 'a or_error = ('a, string) Result.result
+type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
 type ('a,'rw) pipe = ('a,'rw) Maki_pipe.t
 
@@ -22,6 +22,8 @@ type ('a,'rw) pipe = ('a,'rw) Maki_pipe.t
 type path = string
 type program = string
 type time = float
+
+exception Maki_error of string
 
 (** {2 Controlling Parallelism} *)
 
@@ -47,13 +49,11 @@ end
 module Value : sig
   type 'a ops = {
     descr: string; (* description of 'a *)
-    serialize : 'a -> Bencode.t;
+    serialize :
+      [`Fast of ('a -> Bencode.t)
+      | `Slow of ('a -> Bencode.t Lwt.t)
+      ];
     unserialize : Bencode.t -> 'a or_error;
-    timestamp: ('a -> time) option;
-      (* last time the value was modified *)
-    canonical_form : ('a -> string Lwt.t) option;
-      (* unique representation of ['a]. If absent, the bencode
-         encoding of [serialize] is used *)
   }
   (* ['a ops] describes how to use values of type ['a] as memoized values.
      A value must be serializable, unserializable, and
@@ -62,21 +62,24 @@ module Value : sig
      w.r.t. caching and recomputations. *)
 
   val make :
-    ?timestamp:('a -> time) ->
-    ?canonical_form:('a -> string Lwt.t) ->
+    serialize:[`Fast of ('a -> Bencode.t) | `Slow of ('a -> Bencode.t Lwt.t)]->
+    unserialize:(Bencode.t -> 'a or_error) ->
+    string -> 'a ops
+
+  val make_fast :
     serialize:('a -> Bencode.t) ->
     unserialize:(Bencode.t -> 'a or_error) ->
     string -> 'a ops
 
-  val serialize : 'a ops -> 'a -> Bencode.t
-  val unserialize : 'a ops -> Bencode.t -> 'a or_error
-  val to_string : 'a ops -> 'a -> string
-  val of_string : 'a ops -> string -> 'a or_error
-  val canonical_form : 'a ops -> 'a -> string Lwt.t
-  val last_timestamp : 'a ops -> 'a -> time option
+  val make_slow :
+    serialize:('a -> Bencode.t Lwt.t)->
+    unserialize:(Bencode.t -> 'a or_error) ->
+    string -> 'a ops
 
-  val compare : 'a ops -> 'a -> 'a -> int
-  (** [compare ops a b] compares [a] and [b], using the {b to_string} form *)
+  val serialize : 'a ops -> 'a -> Bencode.t Lwt.t
+  val unserialize : 'a ops -> Bencode.t -> 'a or_error
+  val to_string : 'a ops -> 'a -> string Lwt.t
+  val of_string : 'a ops -> string -> 'a or_error
 
   val int : int ops
   val string : string ops
@@ -92,6 +95,8 @@ module Value : sig
   (** [set op] is similar to {!list}, except the order of elements does
       not matter. *)
 
+  (* TODO: `program` type (use $PATH + the same as file) *)
+
   val pair : 'a ops -> 'b ops -> ('a * 'b) ops
   val triple : 'a ops -> 'b ops -> 'c ops -> ('a * 'b * 'c) ops
   val quad : 'a ops -> 'b ops -> 'c ops -> 'd ops -> ('a * 'b * 'c * 'd) ops
@@ -104,6 +109,10 @@ module Value : sig
   val pack_int : int -> t
   val pack_string : string -> t
   val pack_bool : bool -> t
+  val pack_file : path -> t
+  val pack_list : 'a ops -> 'a list -> t
+  val pack_set : 'a ops -> 'a list -> t
+  val pack_assoc : 'a ops -> (string * 'a) list -> t
 end
 
 (** {2 On-Disk storage}
@@ -140,14 +149,34 @@ type lifetime =
 val call :
   ?storage:Storage.t ->
   ?lifetime:lifetime ->
+  ?limit:Limit.t ->
   name:string ->
   deps:Value.t list ->
   op:'res Value.ops ->
   (unit -> 'res Lwt.t) ->
   'res or_error Lwt.t
 (** Call the function iff its result has not been cached yet
+    @param storage the storage used for caching values
+      (default [Storage.get_default ()])
     @param lifetime how long to keep the cached value (defautl: CanDrop)
+    @param limit if given, [call] will acquire a handle from [limit] before
+      calling the (potentially costly) function
+    @param name the name of the function, should be unique!
+    @param deps dependencies of the computation; if they change, the function
+      will have to be re-computed. In other words, the function is supposed
+      to be pure on the list of dependencies (same dependencies => same result)
 *)
+
+val call_exn :
+  ?storage:Storage.t ->
+  ?lifetime:lifetime ->
+  ?limit:Limit.t ->
+  name:string ->
+  deps:Value.t list ->
+  op:'res Value.ops ->
+  (unit -> 'res Lwt.t) ->
+  'res Lwt.t
+(** Same as {!call} but raises the exception instead of wrapping it in Error *)
 
 (** {2 Utils} *)
 

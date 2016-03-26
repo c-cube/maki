@@ -4,38 +4,32 @@
 
 (** {1 On-Disk Storage} *)
 
-type 'a or_error = ('a, string) Result.result
+type 'a or_error = ('a, exn) Result.result
 type path = string
 
 type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
   set: string -> string -> unit or_error Lwt.t;
-  iter: ?preload:int -> unit -> (string * string, [`r]) Maki_pipe.t;
+  fold: 'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t;
   flush_cache: unit -> unit;
 }
-
-exception Storage_error of string
 
 val get : t -> string -> string option or_error Lwt.t
 (** [get t k] obtains the value for [k] in [t] *)
 
 val get_exn : t -> string -> string option Lwt.t
-(** @raise Storage_error in case of failure *)
 
 val find : t -> string -> string Lwt.t
-(** @raise Storage_error in case of failure
-    @raise Not_found if key could not be found *)
+(** @raise Not_found if key could not be found *)
 
 val set : t -> string -> string -> unit or_error Lwt.t
 (** [set t k v] puts the pair [k -> v] in [t] *)
 
 val set_exn : t -> string -> string -> unit Lwt.t
 
-val iter : ?preload:int -> t -> (string * string, [`r]) Maki_pipe.t
-(** [iter t] iterates over all the pairs [key, value] in [t].
-    @param preload number of entries that are loaded in advance, before
-     they are pushed into the pipe *)
+val fold : t -> f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t
+(** [fold ~f ~x t] folds over all the pairs [key, value] in [t]. *)
 
 val flush_cache : t -> unit
 (** Flush in-process cache, if any *)

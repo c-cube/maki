@@ -6,14 +6,14 @@
 open Result
 open Lwt.Infix
 
-type 'a or_error = ('a, string) Result.result
+type 'a or_error = ('a, exn) Result.result
 type path = string
 
 type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
   set: string -> string -> unit or_error Lwt.t;
-  iter: ?preload:int -> unit -> (string * string, [`r]) Maki_pipe.t;
+  fold: 'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t;
   flush_cache: unit -> unit;
 }
 
@@ -21,26 +21,24 @@ let env_var_ = "MAKI_DIR"
 
 let get t k = t.get k
 let set t k v = t.set k v
-let iter ?preload t = t.iter ?preload ()
+let fold t ~f ~x = t.fold ~f ~x
 let flush_cache t = t.flush_cache ()
-
-exception Storage_error of string
 
 let get_exn t k =
   t.get k >>= function
     | Ok x -> Lwt.return x
-    | Error e -> Lwt.fail (Storage_error e)
+    | Error e -> Lwt.fail e
 
 let find t k =
   t.get k >>= function
     | Ok (Some x) -> Lwt.return x
     | Ok None -> Lwt.fail Not_found
-    | Error e -> Lwt.fail (Storage_error e)
+    | Error e -> Lwt.fail e
 
 let set_exn t k v =
   t.set k v >>= function
     | Ok () -> Lwt.return_unit
-    | Error e -> Lwt.fail (Storage_error e)
+    | Error e -> Lwt.fail e
 
 module Default = struct
   type t = {
@@ -63,7 +61,7 @@ module Default = struct
           then read_file_ f >|= fun x -> Ok (Some x)
           else Lwt.return (Ok None))
         (fun e ->
-          Lwt.return (Error (Printexc.to_string e)))
+          Lwt.return (Error e))
       >|= fun res ->
       Hashtbl.add t.cache k res;
       res
@@ -82,33 +80,27 @@ module Default = struct
             Lwt_io.flush oc)
         >|= fun () -> Ok ()
       )
-      (fun e ->
-        Lwt.return (Error (Printexc.to_string e)))
+      (fun e -> Lwt.return (Error e))
 
-  let iter t ?(preload=16) () =
-    let module P = Maki_pipe in
-    let d = Unix.opendir t.dir in
-    let pipe =
-      P.create ~on_close:(fun () -> Unix.closedir d) ~max_size:preload () in
-    (* push directory entries into [pipe] *)
-    let rec push pipe dir =
+  let fold t ~f ~x:acc =
+    let dir = Unix.opendir t.dir in
+    let rec aux acc =
       match Unix.readdir dir with
       | k ->
-        let f = k_to_file t k in
-        if Sys.is_directory f
-        then push pipe dir (* ignore directories *)
+        let file = k_to_file t k in
+        if Sys.is_directory file
+        then aux acc (* ignore directories *)
         else (
-          read_file_ f >>= fun value ->
-          P.write pipe (k,value) >>= fun () ->
-          push pipe dir
+          read_file_ file >>= fun value ->
+          f acc (k,value) >>= aux
         )
       | exception (Unix.Unix_error _ as e) ->
-        P.write_error pipe (Printexc.to_string e) >>= fun () ->
-        P.close pipe
-      | exception End_of_file -> P.close pipe
+        Unix.closedir dir;
+        Lwt.fail e
+      | exception End_of_file ->
+        Lwt.return acc
     in
-    Lwt.async (fun () -> push pipe d);
-    pipe
+    aux acc
 
   let flush t () = Hashtbl.clear t.cache
 
@@ -122,7 +114,7 @@ module Default = struct
       name="shelf";
       get=get t;
       set=set t;
-      iter=iter t;
+      fold=(fun ~f ~x -> fold t ~f ~x);
       flush_cache=flush t;
     }
 end
