@@ -17,6 +17,8 @@ let parse_argv () =
   let options =
     Arg.align
     [ "--rm-files", Arg.Set rm_file, " remove files corresponding to unnedeed results"
+    ; "--debug", Arg.Int Maki_log.set_level, " set debug level"
+    ; "-d", Arg.Int Maki_log.set_level, " short for --debug"
     ]
   in
   Arg.parse options (fun _ -> ()) "usage: maki_gc [options]";
