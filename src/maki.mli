@@ -142,9 +142,11 @@ module Storage = Maki_storage
 
 (** lifetime for a cached value *)
 type lifetime =
-  | Keep
-  | KeepUntil of time
-  | CanDrop
+  [ `Keep
+  | `KeepFor of time (** Time delta *)
+  | `KeepUntil of time (** Absolute deadline *)
+  | `CanDrop
+  ]
 
 val call :
   ?storage:Storage.t ->

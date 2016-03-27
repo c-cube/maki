@@ -11,6 +11,7 @@ module B = Bencode
 module LwtErr = Maki_lwt_err
 
 let (>>>=) = LwtErr.(>>=)
+let (>>|=) = LwtErr.(>|=)
 
 type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
@@ -403,17 +404,17 @@ module Storage = Maki_storage
    in parallel (instead, first one to start puts its own future in table)
    *)
 
-type lifetime =
+type gc_info =
   | Keep
   | KeepUntil of time
   | CanDrop
 
-let bencode_of_lifetime = function
+let bencode_of_gc_info = function
   | Keep -> B.String "keep"
   | KeepUntil t -> B.List [B.String "keep_until"; B.String (string_of_float t)]
   | CanDrop -> B.String "drop"
 
-let lifetime_of_bencode = function
+let gc_info_of_bencode = function
   | B.String "keep" -> Ok Keep
   | B.List [B.String "keep_until"; B.String t] ->
     begin try Ok (KeepUntil (float_of_string t))
@@ -422,15 +423,23 @@ let lifetime_of_bencode = function
   | B.String "drop" -> Ok CanDrop
   | _ -> Error (Maki_error "expected lifetime")
 
+(* lifetime for a cached value *)
+type lifetime =
+  [ `Keep
+  | `KeepFor of time (** Time delta *)
+  | `KeepUntil of time (** Absolute deadline *)
+  | `CanDrop
+  ]
+
 (* map computation_name -> future (serialized) result *)
-type memo_table = (string, string Lwt.t) Hashtbl.t
+type memo_table = (string, string or_error Lwt.t) Hashtbl.t
 
 let memo_table_ : memo_table = Hashtbl.create 64
 
 (* structure, stored on disk, representing the result of some
    computation. Dependencies are listed for the GC not to collect them *)
 type cache_value = {
-  cv_lifetime: lifetime; (* how long should the GC keep this value *)
+  cv_gc_info: gc_info; (* how long should the GC keep this value *)
   cv_deps: string list; (* dependencies used to compute this value *)
   cv_data: string; (* the actual data *)
 }
@@ -438,22 +447,20 @@ type cache_value = {
 (* serialize [c] into Bencode *)
 let bencode_of_cache_value c =
   B.Dict
-    [ "lifetime", bencode_of_lifetime c.cv_lifetime
+    [ "gc_info", bencode_of_gc_info c.cv_gc_info
     ; "deps", b_list (List.map b_str c.cv_deps)
     ; "data", b_str c.cv_data
     ]
 
 (* [s] is a serialized cached value, turn it into a [cache_value] *)
-let cache_value_of_string s : cache_value or_error =
+let cache_value_of_bencode b : cache_value or_error =
   let open Res_ in
-  decode_bencode s >>= fun b ->
   match b with
     | B.Dict l ->
-      let open Res_ in
-      assoc_ "lifetime" l >>= lifetime_of_bencode >>= fun cv_lifetime ->
+      assoc_ "lifetime" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
       assoc_ "deps" l >>= as_list_ >>= map_l as_str_ >>= fun cv_deps ->
       assoc_ "data" l >>= as_str_ >>= fun cv_data ->
-      return {cv_data; cv_deps; cv_lifetime}
+      return {cv_data; cv_deps; cv_gc_info}
     | _ -> Error (Maki_error "expected cache_value")
 
 (* compute the hash of the result of computing the application of
@@ -477,7 +484,7 @@ let compute_name fun_name l =
 *)
 let call
 ?(storage=Storage.get_default ())
-?(lifetime=CanDrop)
+?(lifetime=`CanDrop)
 ?limit
 ~name:fun_name
 ~deps
@@ -487,14 +494,10 @@ f
   (* compute the "name" of the computation *)
   compute_name fun_name deps >>= fun computation_name ->
   let h_computation_name = Sha1.string computation_name |> Sha1.to_hex in
-  let result_of_string s =
-    let open Res_ in
-    cache_value_of_string s >>= fun cv ->
-    (* TODO: if cv.cv_lifetime = KeepUntil, refresh timestamp *)
-    Value.of_string op cv.cv_data
-  in
-  let do_job promise_serialized () =
-    (* FIXME: promise_serialized might never wakeup if this thread fails *)
+  (* compute the result of calling the function, or retrieve the result in
+     cache. This returns a [('a * string) or_error Lwt.t] where
+     the string is the serialization of the ['a] *)
+  let compute_memoized () =
     (* check on-disk cache *)
     Storage.get storage h_computation_name >>>=
     function
@@ -506,33 +509,50 @@ f
       end >>= fun res ->
       Value.to_string op res >>= fun cv_data ->
       Lwt_list.map_p Value.to_string_packed deps >>= fun cv_deps ->
-      let cv = {cv_lifetime=lifetime; cv_deps; cv_data} in
+      let cv_gc_info = match lifetime with
+        | `CanDrop -> CanDrop
+        | `Keep -> Keep
+        | `KeepUntil t -> KeepUntil t
+        | `KeepFor t ->
+          let now = Unix.gettimeofday () in
+          KeepUntil (now +. t)
+      in
+      let cv = {cv_gc_info; cv_deps; cv_data} in
       let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
-      Lwt.wakeup promise_serialized res_serialized;
       Storage.set storage h_computation_name res_serialized
       >>>= fun () ->
-      Lwt.return (Ok res)
+      Lwt.return (Ok (res, cv_data))
     | Some s ->
-      Lwt.wakeup promise_serialized s;
-      Lwt.return (result_of_string s)
+      (* TODO: if cv.cv_gc_info = KeepUntil, refresh timestamp *)
+      let res =
+        let open Res_ in
+        decode_bencode s >>= fun b ->
+        cache_value_of_bencode b >>= fun cv ->
+        Value.of_string op cv.cv_data >|= fun res -> res,cv.cv_data
+      in
+      Lwt.return res
   in
   (* check memo table *)
   try
     let future_res = Hashtbl.find memo_table_ h_computation_name in
     (* ok, some other thread is performing the computation, just wait
        for it to complete and deserialize the result *)
-    future_res >|= fun s ->
-    result_of_string s
+    future_res >|= fun s_or_err ->
+    Res_.(s_or_err >>= Value.of_string op)
   with Not_found ->
     let res_serialized, promise_serialized = Lwt.wait () in
     (* put future result in memo table in case another thread wants to
        compute the same value *)
     Hashtbl.add memo_table_ h_computation_name res_serialized;
-    Lwt.on_termination res_serialized
-      (fun () -> Hashtbl.remove memo_table_ h_computation_name);
     (* compute result *)
-    let res = do_job promise_serialized () in
-    res
+    let res = compute_memoized () in
+    (* ensure that when [res] terminates, [res_serialized] is updated *)
+    Lwt.on_any res
+      (function
+        | Ok (_,str) -> Lwt.wakeup promise_serialized (Ok str)
+        | Error e -> Lwt.wakeup promise_serialized (Error e))
+      (fun e -> Lwt.wakeup promise_serialized (Error e));
+    res >>|= fst
 
 let call_exn ?storage ?lifetime ?limit ~name ~deps ~op f =
   call ?storage ?lifetime ?limit ~name ~deps ~op f
