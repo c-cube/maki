@@ -13,6 +13,10 @@ let return_unit = Lwt.return (Ok ())
 
 let fail msg = Lwt.return (Error msg)
 
+let unwrap_res = function
+  | Ok x -> Lwt.return x
+  | Error e -> Lwt.fail e
+
 let (>>=) x f =
   Lwt.bind x
     (function

@@ -98,8 +98,6 @@ module Value : sig
   (** [set op] is similar to {!list}, except the order of elements does
       not matter. *)
 
-  (* TODO: `program` type (use $PATH + the same as file) *)
-
   val pair : 'a ops -> 'b ops -> ('a * 'b) ops
   val triple : 'a ops -> 'b ops -> 'c ops -> ('a * 'b * 'c) ops
   val quad : 'a ops -> 'b ops -> 'c ops -> 'd ops -> ('a * 'b * 'c * 'd) ops
@@ -227,4 +225,5 @@ val shellf :
   ('a, Format.formatter, unit, (string * string * int) Lwt.t) format4 -> 'a
 (** Same as {!shell} but with a format string. Careful with escaping! *)
 
+(* TODO: globbing, for depending on lists of files easily *)
 

@@ -181,6 +181,30 @@ type file_cache = (string, file_state) Hashtbl.t
 
 let file_cache_ : file_cache = Hashtbl.create 128
 
+let compute_file_state_ f =
+  Lwt.catch
+    (fun () ->
+      let fs =
+        try
+          let fs = Hashtbl.find file_cache_ f in
+          let time' = last_time_ f in
+          ( if time' <> fs.fs_time
+            then sha1 f >|= Sha1.to_hex
+            else Lwt.return fs.fs_hash )
+          >|= fun hash ->
+          Ok {fs with fs_time=time'; fs_hash=hash}
+        with Not_found ->
+          let fs_time = last_time_ f in
+          sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
+          Ok { fs_path=f; fs_time; fs_hash}
+      in
+      Lwt.on_success fs
+        (function
+          | Ok r -> Hashtbl.replace file_cache_ f r
+          | Error _ -> ());
+      fs)
+    (fun e -> Lwt.return (Error e))
+
 module Value = struct
   type 'a ops = {
     descr: string; (* description of 'a *)
@@ -234,26 +258,6 @@ module Value = struct
               end
             | b -> expected_b "bool" b)
 
-  let compute_file_state_ f =
-    let fs =
-      try
-        let fs = Hashtbl.find file_cache_ f in
-        let time' = last_time_ f in
-        ( if time' <> fs.fs_time
-          then sha1 f >|= Sha1.to_hex
-          else Lwt.return fs.fs_hash )
-        >|= fun hash ->
-        {fs with fs_time=time'; fs_hash=hash}
-      with Not_found ->
-        let fs_time = last_time_ f in
-        sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
-        { fs_path=f; fs_time; fs_hash}
-    in
-    Lwt.on_success fs
-      (fun r ->
-         Hashtbl.replace file_cache_ f r);
-    fs
-
   (* special behavior for files: comparison is done be by timestamp+hash *)
   let file =
     (* serialize:
@@ -261,7 +265,7 @@ module Value = struct
        and compute hash if timestamp changed or file is not in cache *)
     make_slow "file"
       ~serialize:(fun f ->
-          compute_file_state_ f >|= bencode_of_fs)
+          compute_file_state_ f >>= Maki_lwt_err.unwrap_res >|= bencode_of_fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -282,7 +286,7 @@ module Value = struct
           find_program_path_ f >>= function
           | Error e -> Lwt.fail e
           | Ok p ->
-            compute_file_state_ p >|= bencode_of_fs)
+            compute_file_state_ p >>= Maki_lwt_err.unwrap_res >|= bencode_of_fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -492,6 +496,23 @@ let compute_name fun_name l =
   let b = B.List (B.String fun_name :: l) in
   B.encode_to_string b
 
+(* check if [f] is a [file_state] that doesn't correspond to the actual
+   content of the disk *)
+let is_invalid_file_ref f =
+  let fs =
+    let open Res_ in
+    decode_bencode f >>=
+    fs_of_bencode
+  in
+  match fs with
+  | Error _ -> Lwt.return_false (* not a file *)
+  | Ok fs ->
+    (* compare [fs] with actual current file state *)
+    compute_file_state_ fs.fs_path
+    >|= function
+    | Error _ -> true  (* file not present, etc. *)
+    | Ok fs' -> fs'.fs_hash <> fs.fs_hash
+
 (*
    - compute a string [s] out of computation and dependencies [to_string]
    - compute the content's hash (canonical form) of dependencies,
@@ -517,49 +538,64 @@ f
      cache. This returns a [('a * string) or_error Lwt.t] where
      the string is the serialization of the ['a] *)
   let compute_memoized () =
-    (* check on-disk cache *)
+    begin match limit with
+      | None -> f ()
+      | Some l -> Limit.acquire l f
+    end >>= fun res ->
+    Value.to_string op res >>= fun cv_data ->
+    Lwt_list.map_p Value.to_string_packed deps >>= fun cv_deps ->
+    let cv_gc_info = match lifetime with
+      | `CanDrop -> CanDrop
+      | `Keep -> Keep
+      | `KeepUntil t -> KeepUntil t
+      | `KeepFor t ->
+        let now = Unix.gettimeofday () in
+        KeepUntil (now +. t)
+    in
+    let cv = {cv_gc_info; cv_deps; cv_data} in
+    let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
+    Maki_log.logf 3
+      (fun k->k "save result `%s` into storage %s (gc_info: %s)"
+          computation_name (Storage.name storage)
+          (bencode_of_gc_info cv_gc_info |> B.encode_to_string));
+    Storage.set storage h_computation_name res_serialized
+    >>>= fun () ->
+    Lwt.return (Ok (res, cv_data))
+  in
+  (* check on-disk cache *)
+  let check_cache_or_compute () =
     Storage.get storage h_computation_name >>>=
     function
     | None ->
+      (* not in cache, perform computation (possibly acquiring the "limit" first *)
       Maki_log.logf 3
         (fun k->k "could not find `%s` in storage %s"
             computation_name (Storage.name storage));
-      (* not in cache, perform computation (possibly acquiring the "limit" first *)
-      begin match limit with
-        | None -> f ()
-        | Some l -> Limit.acquire l f
-      end >>= fun res ->
-      Value.to_string op res >>= fun cv_data ->
-      Lwt_list.map_p Value.to_string_packed deps >>= fun cv_deps ->
-      let cv_gc_info = match lifetime with
-        | `CanDrop -> CanDrop
-        | `Keep -> Keep
-        | `KeepUntil t -> KeepUntil t
-        | `KeepFor t ->
-          let now = Unix.gettimeofday () in
-          KeepUntil (now +. t)
-      in
-      let cv = {cv_gc_info; cv_deps; cv_data} in
-      let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
-      Maki_log.logf 3
-        (fun k->k "save result `%s` into storage %s (gc_info: %s)"
-            computation_name (Storage.name storage)
-            (bencode_of_gc_info cv_gc_info |> B.encode_to_string));
-      Storage.set storage h_computation_name res_serialized
-      >>>= fun () ->
-      Lwt.return (Ok (res, cv_data))
+      compute_memoized ()
     | Some s ->
       (* TODO: if cv.cv_gc_info = KeepUntil, refresh timestamp *)
       Maki_log.logf 3
         (fun k->k "found result of `%s` in storage %s"
             computation_name (Storage.name storage));
+      (* read result from the raw data *)
       let res =
         let open Res_ in
         decode_bencode s >>= fun b ->
         cache_value_of_bencode b >>= fun cv ->
         Value.of_string op cv.cv_data >|= fun res -> res,cv.cv_data
       in
-      Lwt.return res
+      let fut_res = Lwt.return res in
+      fut_res >>>= fun (_,cv_data) ->
+      (* if result is a file, check that file exists, and that
+         it's the same as expected. Otherwise recompute (calling
+         compute_memoized recursively) *)
+      is_invalid_file_ref cv_data >>= fun invalid ->
+      if invalid
+      then (
+        Maki_log.logf 3
+          (fun k->k "cached file %s is invalid, recompute" cv_data);
+        compute_memoized ()
+      ) else fut_res
   in
   (* check memo table *)
   try
@@ -574,7 +610,7 @@ f
        compute the same value *)
     Hashtbl.add memo_table_ h_computation_name res_serialized;
     (* compute result *)
-    let res = compute_memoized () in
+    let res = check_cache_or_compute () in
     (* ensure that when [res] terminates, [res_serialized] is updated *)
     Lwt.on_any res
       (function
