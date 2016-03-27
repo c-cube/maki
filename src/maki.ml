@@ -539,3 +539,5 @@ let call_exn ?storage ?lifetime ?limit ~name ~deps ~op f =
   >>= function
   | Ok x -> Lwt.return x
   | Error e -> Lwt.fail e
+
+(* TODO: GC *)

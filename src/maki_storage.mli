@@ -7,6 +7,17 @@
 type 'a or_error = ('a, exn) Result.result
 type path = string
 
+(* TODO:
+   - optional interface for Memcached
+   - optional interface for LMDB
+   - optional interface for Sqlite
+   - optional interface to DHT
+   - composition of storages:
+     * like RAID1, duplicate writes, use first terminating read
+     * use one storage as a fast cache for the second storage (slower but
+       probably more comprehensive; e.g. memcached + DHT for distributed jobs)
+   *)
+
 type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
