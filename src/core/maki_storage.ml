@@ -20,6 +20,7 @@ type t = {
 
 let env_var_ = "MAKI_DIR"
 
+let name t = t.name
 let get t k = t.get k
 let set t k v = t.set k v
 let remove t k = t.remove k

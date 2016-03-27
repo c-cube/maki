@@ -234,13 +234,9 @@ module Value = struct
               end
             | b -> expected_b "bool" b)
 
-  (* special behavior for files: comparison is done be by timestamp+hash *)
-  let file =
-    (* serialize:
-       look into cache for the file_state, compare timestamp,
-       and compute hash if timestamp changed or file is not in cache *)
-    let serialize f =
-      begin try
+  let compute_file_state_ f =
+    let fs =
+      try
         let fs = Hashtbl.find file_cache_ f in
         let time' = last_time_ f in
         ( if time' <> fs.fs_time
@@ -252,12 +248,41 @@ module Value = struct
         let fs_time = last_time_ f in
         sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
         { fs_path=f; fs_time; fs_hash}
-      end >>= fun fs ->
-      Hashtbl.replace file_cache_ f fs;
-      Lwt.return (bencode_of_fs fs)
     in
+    Lwt.on_success fs
+      (fun r ->
+         Hashtbl.replace file_cache_ f r);
+    fs
+
+  (* special behavior for files: comparison is done be by timestamp+hash *)
+  let file =
+    (* serialize:
+       look into cache for the file_state, compare timestamp,
+       and compute hash if timestamp changed or file is not in cache *)
     make_slow "file"
-      ~serialize
+      ~serialize:(fun f ->
+          compute_file_state_ f >|= bencode_of_fs)
+      ~unserialize:(fun b ->
+          let open Res_ in
+          fs_of_bencode b >|= fun fs -> fs.fs_path)
+
+  (* turn [f], a potentially relative path to a program, into an absolute path *)
+  let find_program_path_ f =
+    if Filename.is_relative f
+    then
+      shellf "which '%s'" f >>= fun (out,_,errcode) ->
+      if errcode=0 then Lwt.return (Ok out) else Lwt.return (Error Not_found)
+    else Lwt.return (Ok f)
+
+  (* special behavior for programs: find the path to the binary,
+     then behave like a file *)
+  let program =
+    make_slow "program"
+      ~serialize:(fun f ->
+          find_program_path_ f >>= function
+          | Error e -> Lwt.fail e
+          | Ok p ->
+            compute_file_state_ p >|= bencode_of_fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -496,6 +521,9 @@ f
     Storage.get storage h_computation_name >>>=
     function
     | None ->
+      Maki_log.logf 3
+        (fun k->k "could not find `%s` in storage %s"
+            computation_name (Storage.name storage));
       (* not in cache, perform computation (possibly acquiring the "limit" first *)
       begin match limit with
         | None -> f ()
@@ -513,11 +541,18 @@ f
       in
       let cv = {cv_gc_info; cv_deps; cv_data} in
       let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
+      Maki_log.logf 3
+        (fun k->k "save result `%s` into storage %s (gc_info: %s)"
+            computation_name (Storage.name storage)
+            (bencode_of_gc_info cv_gc_info |> B.encode_to_string));
       Storage.set storage h_computation_name res_serialized
       >>>= fun () ->
       Lwt.return (Ok (res, cv_data))
     | Some s ->
       (* TODO: if cv.cv_gc_info = KeepUntil, refresh timestamp *)
+      Maki_log.logf 3
+        (fun k->k "found result of `%s` in storage %s"
+            computation_name (Storage.name storage));
       let res =
         let open Res_ in
         decode_bencode s >>= fun b ->
@@ -636,8 +671,10 @@ let gc_storage ?(remove_file=false) s =
     (fun k c ->
        match c.gc_status with
          | `Alive | `Root ->
+           Maki_log.logf 5 (fun f->f "gc: keep value %s" k);
            incr n_kept
          | `Dead ->
+           Maki_log.logf 5 (fun f->f "gc: remove value %s" k);
            Lwt.async
              (fun () ->
                 Lwt.catch

@@ -90,6 +90,10 @@ module Value : sig
   (** A {b reference} to some file content. This should be compared by
       hash of the file content *)
 
+  val program : program ops
+  (** A {b reference} to some program in the path. This will be turned
+      into an absolute file path first, then handled same as {!file} *)
+
   val set : 'a ops -> 'a list ops
   (** [set op] is similar to {!list}, except the order of elements does
       not matter. *)

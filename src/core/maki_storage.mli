@@ -29,6 +29,9 @@ type t = {
   flush_cache: unit -> unit;
 }
 
+val name : t -> string
+(** Informal description of the storage *)
+
 val get : t -> string -> string option or_error Lwt.t
 (** [get t k] obtains the value for [k] in [t] *)
 
