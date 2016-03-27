@@ -15,7 +15,13 @@ XOCamlbuildExtraArgs: "-j 0"
 Synopsis:    persistent incremental computations, for repeatable tests and benchmarks
 
 Library maki
-  Path:         src/
+  Path:         src/core/
   Modules:      Maki, Maki_storage, Maki_lwt_err
   BuildDepends: lwt.unix, lwt.preemptive, sha, bencode, result, threads
+
+Executable maki_gc
+  Path:         src/gc
+  MainIs:       maki_gc.ml
+  Install:      true
+  BuildDepends: maki
 

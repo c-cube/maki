@@ -15,7 +15,6 @@
 
 type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
-type ('a,'rw) pipe = ('a,'rw) Maki_pipe.t
 
 (** {2 Basic types} *)
 

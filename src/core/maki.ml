@@ -399,11 +399,6 @@ module Storage = Maki_storage
 
 (** {2 Memoized Functions} *)
 
-(* TODO: some state mapping computation_name -> 'a lwt,
-   for avoiding race conditions where several threads would compute a value
-   in parallel (instead, first one to start puts its own future in table)
-   *)
-
 type gc_info =
   | Keep
   | KeepUntil of time
