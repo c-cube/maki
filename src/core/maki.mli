@@ -179,6 +179,24 @@ val call_exn :
   'res Lwt.t
 (** Same as {!call} but raises the exception instead of wrapping it in Error *)
 
+(** {2 GC}
+
+    Garbage Collection for the stored values. It needs to be called
+    explicitely *)
+
+type gc_stats = {
+  gc_kept: int;
+  gc_removed: int;
+}
+
+val string_of_gc_stats : gc_stats -> string
+
+val gc_storage : ?remove_file:bool -> Storage.t -> gc_stats or_error Lwt.t
+(** [gc_storage s] removes uneeded values and uneeded dependencies,
+    and returns some statistics. It might take a long time.
+    @param remove_file if true, when a path result is removed, the
+      file it corresponds to is also deleted from the file system *)
+
 (** {2 Utils} *)
 
 val last_mtime : path -> time or_error

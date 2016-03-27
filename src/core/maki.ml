@@ -15,7 +15,6 @@ let (>>|=) = LwtErr.(>|=)
 
 type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
-type ('a,'rw) pipe = ('a,'rw) Maki_pipe.t
 
 exception Maki_error of string
 
@@ -555,4 +554,106 @@ let call_exn ?storage ?lifetime ?limit ~name ~deps ~op f =
   | Ok x -> Lwt.return x
   | Error e -> Lwt.fail e
 
-(* TODO: GC *)
+(** {2 GC} *)
+
+type gc_stats = {
+  gc_kept: int;
+  gc_removed: int;
+}
+
+let string_of_gc_stats s =
+  Printf.sprintf "kept %d entries, removed %d entries" s.gc_kept s.gc_removed
+
+type gc_cell = {
+  gc_deps: string list;
+  gc_path: path option; (* if file *)
+  mutable gc_status: [`Root | `Alive | `Dead];
+}
+
+type gc_state = (string, gc_cell) Hashtbl.t
+
+(* find the set of roots, collect the graph in RAM *)
+let gc_collect_roots now s : gc_state Lwt.t =
+  let state = Hashtbl.create 256 in
+  Storage.fold s ~x:()
+    ~f:(fun () (key, value) ->
+        (* decide whether to add [key] to [set], so it remains alive, or now *)
+        let map_or_err =
+          let open Res_ in
+          decode_bencode value >>=
+          cache_value_of_bencode >|= fun cv ->
+          (* might be a file path *)
+          let gc_path =match Value.of_string Value.file cv.cv_data with
+            | Ok f -> Some f
+            | Error _ -> None
+          in
+          (* remember dependencies of [key] *)
+          let gc_status = match cv.cv_gc_info with
+            | Keep -> `Root
+            | KeepUntil t -> if t >= now then `Root else `Dead
+            | CanDrop -> `Root
+          in
+          Hashtbl.add state key {gc_deps=cv.cv_deps; gc_status; gc_path};
+        in
+        match map_or_err with
+          | Error e -> Lwt.fail e
+          | Ok () -> Lwt.return_unit
+     )
+  >|= fun () -> state
+
+(* transitive closure of graph: ensure that if [k -> deps] is
+   in [m], then each element of [deps] is in [m] too, and recursively. *)
+let trans_closure g =
+  (* auxiliary function, ensures [k] and its recursive dependencies are alive *)
+  let rec aux k =
+    let cell = Hashtbl.find g k in
+    match cell.gc_status with
+      | `Alive -> () (* has been taken care of already *)
+      | `Dead ->
+        (* traverse *)
+        cell.gc_status <- `Alive;
+        List.iter aux cell.gc_deps
+      | `Root ->
+        List.iter aux cell.gc_deps
+  in
+  Hashtbl.iter
+    (fun k cell ->
+       match cell.gc_status with
+         | `Root -> aux k (* make it alive! *)
+         | `Dead
+         | `Alive -> ())
+    g
+
+let gc_storage ?(remove_file=false) s =
+  let now = Unix.gettimeofday () in
+  gc_collect_roots now s >>= fun st ->
+  trans_closure st;
+  (* actually collect dead cells *)
+  let n_kept = ref 0 in
+  let n_removed = ref 0 in
+  let err = ref None in
+  Hashtbl.iter
+    (fun k c ->
+       match c.gc_status with
+         | `Alive | `Root ->
+           incr n_kept
+         | `Dead ->
+           Lwt.async
+             (fun () ->
+                Lwt.catch
+                  (fun () ->
+                     (* if [c] is a file and [remove_file=true], remove it *)
+                     begin match c.gc_path with
+                       | Some f when remove_file -> Sys.remove f
+                       | _ -> ()
+                     end;
+                     incr n_removed;
+                     Storage.remove s k
+                  )
+                  (fun e -> err := Some e; Lwt.return_unit)))
+    st;
+  match !err with
+    | Some e -> Lwt.return (Error e)
+    | None ->
+      let stats = { gc_kept= !n_kept; gc_removed= !n_removed } in
+      Lwt.return (Ok stats)

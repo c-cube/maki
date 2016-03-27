@@ -16,12 +16,15 @@ type path = string
      * like RAID1, duplicate writes, use first terminating read
      * use one storage as a fast cache for the second storage (slower but
        probably more comprehensive; e.g. memcached + DHT for distributed jobs)
-   *)
+   - a dynlink based system for loading other storage systems
+   - some system for picking storage from CLI options
+*)
 
 type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
   set: string -> string -> unit or_error Lwt.t;
+  remove: string -> unit Lwt.t;
   fold: 'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t;
   flush_cache: unit -> unit;
 }
@@ -38,6 +41,8 @@ val set : t -> string -> string -> unit or_error Lwt.t
 (** [set t k v] puts the pair [k -> v] in [t] *)
 
 val set_exn : t -> string -> string -> unit Lwt.t
+
+val remove : t -> string -> unit Lwt.t
 
 val fold : t -> f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t
 (** [fold ~f ~x t] folds over all the pairs [key, value] in [t]. *)

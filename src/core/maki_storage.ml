@@ -13,6 +13,7 @@ type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
   set: string -> string -> unit or_error Lwt.t;
+  remove: string -> unit Lwt.t;
   fold: 'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t;
   flush_cache: unit -> unit;
 }
@@ -21,6 +22,7 @@ let env_var_ = "MAKI_DIR"
 
 let get t k = t.get k
 let set t k v = t.set k v
+let remove t k = t.remove k
 let fold t ~f ~x = t.fold ~f ~x
 let flush_cache t = t.flush_cache ()
 
@@ -82,6 +84,11 @@ module Default = struct
       )
       (fun e -> Lwt.return (Error e))
 
+  let remove t k =
+    let f = k_to_file t k in
+    Sys.remove f;
+    Lwt.return_unit
+
   let fold t ~f ~x:acc =
     let dir = Unix.opendir t.dir in
     let rec aux acc =
@@ -114,6 +121,7 @@ module Default = struct
       name="shelf";
       get=get t;
       set=set t;
+      remove=remove t;
       fold=(fun ~f ~x -> fold t ~f ~x);
       flush_cache=flush t;
     }
