@@ -1,4 +1,5 @@
-S src
+S src/core
+S src/gc
 B _build/src/**
 PKG lwt.unix
 PKG sha
