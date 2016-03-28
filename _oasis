@@ -20,8 +20,9 @@ Library maki
   BuildDepends: lwt.unix, lwt.preemptive, sha, bencode, result, threads
 
 Executable maki_gc
-  Path:         src/gc
-  MainIs:       maki_gc.ml
-  Install:      true
-  BuildDepends: maki
+  Path:           src/gc
+  MainIs:         maki_gc.ml
+  CompiledObject: best
+  Install:        true
+  BuildDepends:   maki
 
