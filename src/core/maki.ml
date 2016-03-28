@@ -291,6 +291,13 @@ module Value = struct
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
 
+  let marshal name =
+    make_fast name
+      ~serialize:(fun x -> b_str (Marshal.to_string x []))
+      ~unserialize:(function
+          | B.String s -> Marshal.from_string s 0
+          | b -> expected_b "string" b)
+
   let list op =
     let descr = Printf.sprintf "(list %s)" op.descr in
     let serialize = match op.serialize with
@@ -418,6 +425,8 @@ module Value = struct
   let pack_list op = pack (list op)
   let pack_set op = pack (set op)
   let pack_assoc op = pack (assoc op)
+
+  let argv0 = pack program Sys.argv.(0)
 
   let to_string_packed (Value (op,x)) = to_string op x
 end

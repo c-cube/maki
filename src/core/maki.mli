@@ -98,6 +98,11 @@ module Value : sig
   (** [set op] is similar to {!list}, except the order of elements does
       not matter. *)
 
+  val marshal : string -> 'a ops
+  (** Use {!Marshal} to store and retrieve data. Caution, this is somewhat
+      unsafe, but useful for quick-and-dirty work.
+      @param descr the description of the type (see {!make}) *)
+
   val pair : 'a ops -> 'b ops -> ('a * 'b) ops
   val triple : 'a ops -> 'b ops -> 'c ops -> ('a * 'b * 'c) ops
   val quad : 'a ops -> 'b ops -> 'c ops -> 'd ops -> ('a * 'b * 'c * 'd) ops
@@ -105,6 +110,9 @@ module Value : sig
   (** {6 Universal type for Values} *)
 
   type t = Value : 'a ops * 'a -> t
+
+  val argv0 : t
+  (** Value corresponding to the program [Sys.argv.(0)] *)
 
   val pack : 'a ops -> 'a -> t
   val pack_int : int -> t
