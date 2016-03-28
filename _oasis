@@ -16,7 +16,7 @@ Synopsis:    persistent incremental computations, for repeatable tests and bench
 
 Library maki
   Path:         src/core/
-  Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log
+  Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log, Maki_bencode
   BuildDepends: lwt.unix, lwt.preemptive, sha, bencode, result, threads
 
 Executable maki_gc

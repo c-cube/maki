@@ -22,8 +22,6 @@ type path = string
 type program = string
 type time = float
 
-exception Maki_error of string
-
 (** {2 Controlling Parallelism} *)
 
 module Limit : sig

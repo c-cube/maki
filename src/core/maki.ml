@@ -7,6 +7,7 @@ open Result
 open Lwt.Infix
 
 module B = Bencode
+module BM = Maki_bencode
 
 module LwtErr = Maki_lwt_err
 
@@ -15,8 +16,6 @@ let (>>|=) = LwtErr.(>|=)
 
 type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
-
-exception Maki_error of string
 
 module Res_ = struct
   let return x = Ok x
@@ -41,10 +40,6 @@ module Res_ = struct
       Ok res
     with e -> Error e
 end
-
-let decode_bencode s =
-  try Ok (B.decode (`String s))
-  with _ -> Error (Maki_error (s ^ " is not valid Bencode"))
 
 (** {2 Controlling Parallelism} *)
 
@@ -123,35 +118,6 @@ let shellf ?timeout ?stdin cmd =
        shell ?timeout ?stdin (Buffer.contents buf))
     fmt cmd
 
-let assoc_ k l =
-  try Ok (List.assoc k l)
-  with e -> Error e
-
-let as_str_ = function
-  | B.String s -> Ok s
-  | _ -> Error (Maki_error "expected string")
-
-let as_float_ = function
-  | B.String s ->
-    begin try Ok (float_of_string s) with e -> Error e end
-  | _ -> Error (Maki_error "expected string")
-
-let as_list_ = function
-  | B.List l -> Ok l
-  | _ -> Error (Maki_error "expected list")
-
-let b_str s = B.String s
-let b_list l = B.List l
-let b_dict l = B.Dict l
-let b_pair x y = B.List [x; y]
-let b_triple x y z = B.List [x;y;z]
-let b_quad x y z u = B.List [x;y;z;u]
-
-let expected_s what s =
-  Error (Maki_error (Printf.sprintf "expected %s, got %s" what s))
-
-let expected_b what b = expected_s what (B.encode_to_string b)
-
 (** {2 Values} *)
 
 type file_state = {
@@ -163,11 +129,11 @@ type file_state = {
 let fs_of_bencode = function
   | B.Dict l ->
     let open Res_ in
-    assoc_ "path" l >>= as_str_ >>= fun fs_path ->
-    assoc_ "time" l >>= as_float_ >>= fun fs_time ->
-    assoc_ "hash" l >>= as_str_ >>= fun fs_hash ->
+    BM.assoc "path" l >>= BM.as_str >>= fun fs_path ->
+    BM.assoc "time" l >>= BM.as_float >>= fun fs_time ->
+    BM.assoc "hash" l >>= BM.as_str >>= fun fs_hash ->
     Ok {fs_path; fs_time; fs_hash}
-  | b -> expected_b "file_state" b
+  | b -> BM.expected_b "file_state" b
 
 let bencode_of_fs fs =
   B.Dict
@@ -235,16 +201,16 @@ module Value = struct
         | B.String s ->
           begin
             try Ok (int_of_string s)
-            with _ -> expected_s "int" s
+            with _ -> BM.expected_s "int" s
           end;
-        | b -> expected_b "int" b)
+        | b -> BM.expected_b "int" b)
 
   let string =
     make_fast "string"
       ~serialize:(fun s -> Bencode.String s)
       ~unserialize:(function
           | B.String s -> Ok s
-          | b -> expected_b "string" b)
+          | b -> BM.expected_b "string" b)
 
   let bool =
     make_fast "bool"
@@ -254,9 +220,9 @@ module Value = struct
             | B.Integer n when n<>0 -> Ok true
             | B.String s ->
               begin try Ok (bool_of_string s)
-                with _ -> expected_s "bool" s
+                with _ -> BM.expected_s "bool" s
               end
-            | b -> expected_b "bool" b)
+            | b -> BM.expected_b "bool" b)
 
   (* special behavior for files: comparison is done be by timestamp+hash *)
   let file =
@@ -293,38 +259,38 @@ module Value = struct
 
   let marshal name =
     make_fast name
-      ~serialize:(fun x -> b_str (Marshal.to_string x []))
+      ~serialize:(fun x -> BM.mk_str (Marshal.to_string x []))
       ~unserialize:(function
           | B.String s -> Marshal.from_string s 0
-          | b -> expected_b "string" b)
+          | b -> BM.expected_b "string" b)
 
   let list op =
     let descr = Printf.sprintf "(list %s)" op.descr in
     let serialize = match op.serialize with
       | `Fast f -> `Fast (fun l -> B.List (List.map f l))
-      | `Slow f -> `Slow (fun l -> Lwt_list.map_p f l >|= b_list)
+      | `Slow f -> `Slow (fun l -> Lwt_list.map_p f l >|= BM.mk_list)
     in
     make descr
       ~serialize
       ~unserialize:(function
           | B.List l -> Res_.map_l op.unserialize l
-          | b -> expected_b descr b)
+          | b -> BM.expected_b descr b)
 
   let set op =
     let descr = Printf.sprintf "(set %s)" op.descr in
     (* sort by ordering on Bencode, which is, Pervasives.compare *)
-    let b_list_sort l =
-      List.sort Pervasives.compare l |> b_list
+    let mk_list_sort l =
+      List.sort Pervasives.compare l |> BM.mk_list
     in
     let serialize = match op.serialize with
-      | `Fast f -> `Fast (fun l -> List.map f l |> b_list_sort)
-      | `Slow f -> `Slow (fun l -> Lwt_list.map_p f l >|= b_list_sort)
+      | `Fast f -> `Fast (fun l -> List.map f l |> mk_list_sort)
+      | `Slow f -> `Slow (fun l -> Lwt_list.map_p f l >|= mk_list_sort)
     in
     make descr
       ~serialize
       ~unserialize:(function
           | B.List l -> Res_.map_l op.unserialize l
-          | b -> expected_b descr b)
+          | b -> BM.expected_b descr b)
 
   let assoc op =
     let descr = Printf.sprintf "(assoc %s)" op.descr in
@@ -334,7 +300,9 @@ module Value = struct
           (fun l -> B.Dict (List.map (fun (name,x) -> name, f x) l))
       | `Slow f ->
         `Slow
-          (fun l -> Lwt_list.map_p (fun (name,x) -> f x >|= fun x' -> name,x') l >|= b_dict)
+          (fun l ->
+             Lwt_list.map_p (fun (name,x) -> f x >|= fun x' -> name,x') l
+             >|= BM.mk_dict)
     in
     make descr
       ~serialize
@@ -343,7 +311,7 @@ module Value = struct
             Res_.map_l
               (fun (name,x) -> Res_.(op.unserialize x >|= fun x -> name, x))
               l
-          | b -> expected_b descr b)
+          | b -> BM.expected_b descr b)
 
   let serialize op x = match op.serialize with
     | `Fast f -> Lwt.return (f x)
@@ -356,7 +324,7 @@ module Value = struct
 
   let of_string op s =
     let open Res_ in
-    decode_bencode s >>= unserialize op
+    BM.decode_bencode s >>= unserialize op
 
   let mk_pair a b = a,b
   let mk_triple a b c = a,b,c
@@ -368,14 +336,14 @@ module Value = struct
       | `Fast a, `Fast b ->
         `Fast (fun (x,y) -> B.List [a x; b y])
       | _ ->
-        `Slow (fun (x,y) -> serialize a x >>= fun x -> serialize b y >|= b_pair x)
+        `Slow (fun (x,y) -> serialize a x >>= fun x -> serialize b y >|= BM.mk_pair x)
     in
     make descr
       ~serialize
       ~unserialize:(function
         | B.List [x;y] ->
             Res_.(return mk_pair <*> a.unserialize x <*> b.unserialize y)
-        | b -> expected_b descr b)
+        | b -> BM.expected_b descr b)
 
   let triple a b c =
     let descr = Printf.sprintf "(triple %s %s %s)" a.descr b.descr c.descr in
@@ -386,7 +354,7 @@ module Value = struct
         `Slow (fun (x,y,z) ->
             serialize a x >>= fun x ->
             serialize b y >>= fun y ->
-            serialize c z >|= b_triple x y)
+            serialize c z >|= BM.mk_triple x y)
     in
     make descr
       ~serialize
@@ -394,7 +362,7 @@ module Value = struct
         | B.List [x;y;z] ->
             Res_.(return mk_triple <*> a.unserialize x
                   <*> b.unserialize y <*> c.unserialize z)
-        | b -> expected_b descr b)
+        | b -> BM.expected_b descr b)
 
   let quad a b c d =
     let descr =
@@ -407,7 +375,7 @@ module Value = struct
             serialize a x >>= fun x ->
             serialize b y >>= fun y ->
             serialize c z >>= fun z ->
-            serialize d u >|= b_quad x y z)
+            serialize d u >|= BM.mk_quad x y z)
     in
     make descr
       ~serialize
@@ -415,7 +383,7 @@ module Value = struct
         | B.List [x;y;z;u] ->
             Res_.(return mk_quad <*> a.unserialize x
                   <*> b.unserialize y <*> c.unserialize z <*> d.unserialize u)
-        | b -> expected_b descr b)
+        | b -> BM.expected_b descr b)
 
   let pack op x = Value (op,x)
   let pack_int = pack int
@@ -450,10 +418,10 @@ let gc_info_of_bencode = function
   | B.String "keep" -> Ok Keep
   | B.List [B.String "keep_until"; B.String t] ->
     begin try Ok (KeepUntil (float_of_string t))
-      with _ -> Error (Maki_error "expected float")
+      with _ -> Error (Maki_bencode.Maki_error "expected float")
     end
   | B.String "drop" -> Ok CanDrop
-  | _ -> Error (Maki_error "expected lifetime")
+  | _ -> Error (Maki_bencode.Maki_error "expected lifetime")
 
 (* lifetime for a cached value *)
 type lifetime =
@@ -480,8 +448,8 @@ type cache_value = {
 let bencode_of_cache_value c =
   B.Dict
     [ "gc_info", bencode_of_gc_info c.cv_gc_info
-    ; "deps", b_list (List.map b_str c.cv_deps)
-    ; "data", b_str c.cv_data
+    ; "deps", BM.mk_list (List.map BM.mk_str c.cv_deps)
+    ; "data", BM.mk_str c.cv_data
     ]
 
 (* [s] is a serialized cached value, turn it into a [cache_value] *)
@@ -489,17 +457,17 @@ let cache_value_of_bencode b : cache_value or_error =
   let open Res_ in
   match b with
     | B.Dict l ->
-      assoc_ "lifetime" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
-      assoc_ "deps" l >>= as_list_ >>= map_l as_str_ >>= fun cv_deps ->
-      assoc_ "data" l >>= as_str_ >>= fun cv_data ->
+      BM.assoc "lifetime" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
+      BM.assoc "deps" l >>= BM.as_list >>= map_l BM.as_str >>= fun cv_deps ->
+      BM.assoc "data" l >>= BM.as_str >>= fun cv_data ->
       return {cv_data; cv_deps; cv_gc_info}
-    | _ -> Error (Maki_error "expected cache_value")
+    | _ -> Error (BM.Maki_error "expected cache_value")
 
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
 let compute_name fun_name l =
   Lwt_list.map_p
-    (fun (Value.Value (op,x)) -> Value.to_string op x >|= b_str)
+    (fun (Value.Value (op,x)) -> Value.to_string op x >|= BM.mk_str)
     l
   >|= fun l ->
   let b = B.List (B.String fun_name :: l) in
@@ -510,7 +478,7 @@ let compute_name fun_name l =
 let is_invalid_file_ref f =
   let fs =
     let open Res_ in
-    decode_bencode f >>=
+    BM.decode_bencode f >>=
     fs_of_bencode
   in
   match fs with
@@ -589,7 +557,7 @@ f
       (* read result from the raw data *)
       let res =
         let open Res_ in
-        decode_bencode s >>= fun b ->
+        BM.decode_bencode s >>= fun b ->
         cache_value_of_bencode b >>= fun cv ->
         Value.of_string op cv.cv_data >|= fun res -> res,cv.cv_data
       in
@@ -660,7 +628,7 @@ let gc_collect_roots now s : gc_state Lwt.t =
         (* decide whether to add [key] to [set], so it remains alive, or now *)
         let map_or_err =
           let open Res_ in
-          decode_bencode value >>=
+          BM.decode_bencode value >>=
           cache_value_of_bencode >|= fun cv ->
           (* might be a file path *)
           let gc_path =match Value.of_string Value.file cv.cv_data with
