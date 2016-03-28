@@ -390,6 +390,7 @@ module Value = struct
   let pack_bool = pack bool
   let pack_string = pack string
   let pack_file = pack file
+  let pack_program = pack program
   let pack_list op = pack (list op)
   let pack_set op = pack (set op)
   let pack_assoc op = pack (assoc op)

@@ -118,6 +118,7 @@ module Value : sig
   val pack_bool : bool -> t
   val pack_file : path -> t
   val pack_list : 'a ops -> 'a list -> t
+  val pack_program : program -> t
   val pack_set : 'a ops -> 'a list -> t
   val pack_assoc : 'a ops -> (string * 'a) list -> t
 end
