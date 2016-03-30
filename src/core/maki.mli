@@ -30,7 +30,7 @@ module Limit : sig
   val acquire : t -> (unit -> 'a Lwt.t) -> 'a Lwt.t
 
   val j : unit -> t
-  (** Default limiter for concurrency, shoudl be set by CLI options *)
+  (** Default limiter for concurrency, should be set by CLI options *)
 
   val set_j : int -> unit
   (** Should be called at the beginning to set the value of [j].

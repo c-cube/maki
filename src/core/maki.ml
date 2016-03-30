@@ -241,7 +241,9 @@ module Value = struct
     if Filename.is_relative f
     then
       shellf "which '%s'" f >>= fun (out,_,errcode) ->
-      if errcode=0 then Lwt.return (Ok out) else Lwt.return (Error Not_found)
+      if errcode=0
+      then Lwt.return (Ok (String.trim out))
+      else Lwt.return (Error Not_found)
     else Lwt.return (Ok f)
 
   (* special behavior for programs: find the path to the binary,

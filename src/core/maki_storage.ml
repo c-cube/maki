@@ -52,7 +52,7 @@ module Default = struct
   let k_to_file t f = Filename.concat t.dir f
 
   let read_file_ f =
-    Lwt_io.with_file ~mode:Lwt_io.input f (Lwt_io.read ~count:2048)
+    Lwt_io.with_file ~mode:Lwt_io.input f (fun ic -> Lwt_io.read ic)
 
   let get t k =
     try Lwt.return (Hashtbl.find t.cache k)
