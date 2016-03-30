@@ -130,6 +130,18 @@ end
     one file per pair. *)
 module Storage = Maki_storage
 
+(** {2 Time Utils} *)
+
+module Time : sig
+  type t = time
+  val seconds : int -> t
+  val hours : int -> t
+  val minutes : int -> t
+  val days : int -> t
+  val now : unit -> t
+  val (++) : t -> t -> t
+end
+
 (** {2 Memoized Functions}
 
     This is the heart of the library: a wrapper around {b pure} functions

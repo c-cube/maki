@@ -403,6 +403,18 @@ end
 (** {2 On-Disk storage} *)
 module Storage = Maki_storage
 
+(** {2 Time Utils} *)
+
+module Time = struct
+  type t = time
+  let seconds = float_of_int
+  let hours n = float_of_int n *. 3600.
+  let minutes n = float_of_int n *. 60.
+  let days n = float_of_int n *. hours 24
+  let now () = Unix.gettimeofday()
+  let (++) = (+.)
+end
+
 (** {2 Memoized Functions} *)
 
 type gc_info =
