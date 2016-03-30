@@ -441,6 +441,7 @@ let memo_table_ : memo_table = Hashtbl.create 64
    computation. Dependencies are listed for the GC not to collect them *)
 type cache_value = {
   cv_gc_info: gc_info; (* how long should the GC keep this value *)
+  cv_fun_name: string; (* computed from what? *)
   cv_deps: string list; (* dependencies used to compute this value *)
   cv_data: string; (* the actual data *)
 }
@@ -461,7 +462,8 @@ let cache_value_of_bencode b : cache_value or_error =
       BM.assoc "lifetime" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
       BM.assoc "deps" l >>= BM.as_list >>= map_l BM.as_str >>= fun cv_deps ->
       BM.assoc "data" l >>= BM.as_str >>= fun cv_data ->
-      return {cv_data; cv_deps; cv_gc_info}
+      BM.assoc "name" l >>= BM.as_str >>= fun cv_fun_name ->
+      return {cv_data; cv_deps; cv_gc_info; cv_fun_name}
     | _ -> Error (BM.Maki_error "expected cache_value")
 
 (* compute the hash of the result of computing the application of
@@ -530,7 +532,7 @@ f
         let now = Unix.gettimeofday () in
         KeepUntil (now +. t)
     in
-    let cv = {cv_gc_info; cv_deps; cv_data} in
+    let cv = {cv_gc_info; cv_deps; cv_data; cv_fun_name=fun_name} in
     let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
     Maki_log.logf 3
       (fun k->k "save result `%s` into storage %s (gc_info: %s)"
