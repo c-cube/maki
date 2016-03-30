@@ -16,7 +16,7 @@ build-doc: [ make "doc" ]
 build-test: [ make "test" ]
 remove: [
     ["ocamlfind" "remove" "maki"]
-    ["rm" "%{prefix}%/maki_gc"]
+    ["rm" "%{bin}%/maki_gc"]
 ]
 depends: [
     "ocamlfind" {build}
