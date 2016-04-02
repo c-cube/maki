@@ -122,7 +122,6 @@ let shellf ?timeout ?stdin cmd =
 
 type file_state = {
   fs_path: path;
-  fs_time: time;
   fs_hash: string; (* SHA1 in hex form *)
 }
 
@@ -130,20 +129,18 @@ let fs_of_bencode = function
   | B.Dict l ->
     let open Res_ in
     BM.assoc "path" l >>= BM.as_str >>= fun fs_path ->
-    BM.assoc "time" l >>= BM.as_float >>= fun fs_time ->
     BM.assoc "hash" l >>= BM.as_str >>= fun fs_hash ->
-    Ok {fs_path; fs_time; fs_hash}
+    Ok {fs_path; fs_hash}
   | b -> BM.expected_b "file_state" b
 
 let bencode_of_fs fs =
   B.Dict
     [ "path", B.String fs.fs_path
-    ; "time", B.String (string_of_float fs.fs_time)
     ; "hash", B.String fs.fs_hash
     ]
 
 (* cache for files: maps file name to hash + last modif *)
-type file_cache = (string, file_state) Hashtbl.t
+type file_cache = (string, time * file_state) Hashtbl.t
 
 let file_cache_ : file_cache = Hashtbl.create 128
 
@@ -152,21 +149,21 @@ let compute_file_state_ f =
     (fun () ->
       let fs =
         try
-          let fs = Hashtbl.find file_cache_ f in
+          let time, fs = Hashtbl.find file_cache_ f in
           let time' = last_time_ f in
-          ( if time' <> fs.fs_time
+          ( if time' <> time
             then sha1 f >|= Sha1.to_hex
             else Lwt.return fs.fs_hash )
           >|= fun hash ->
-          Ok {fs with fs_time=time'; fs_hash=hash}
+          Ok (time', {fs with fs_hash=hash})
         with Not_found ->
-          let fs_time = last_time_ f in
+          let time = last_time_ f in
           sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
-          Ok { fs_path=f; fs_time; fs_hash}
+          Ok (time, { fs_path=f; fs_hash})
       in
       Lwt.on_success fs
         (function
-          | Ok r -> Hashtbl.replace file_cache_ f r
+          | Ok x -> Hashtbl.replace file_cache_ f x
           | Error _ -> ());
       fs)
     (fun e -> Lwt.return (Error e))
@@ -231,7 +228,9 @@ module Value = struct
        and compute hash if timestamp changed or file is not in cache *)
     make_slow "file"
       ~serialize:(fun f ->
-          compute_file_state_ f >>= Maki_lwt_err.unwrap_res >|= bencode_of_fs)
+        compute_file_state_ f
+        >>= Maki_lwt_err.unwrap_res
+        >|= fun (_, fs) -> bencode_of_fs fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -254,7 +253,9 @@ module Value = struct
           find_program_path_ f >>= function
           | Error e -> Lwt.fail e
           | Ok p ->
-            compute_file_state_ p >>= Maki_lwt_err.unwrap_res >|= bencode_of_fs)
+            compute_file_state_ p
+            >>= Maki_lwt_err.unwrap_res
+            >|= fun (_,fs) -> bencode_of_fs fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -338,7 +339,8 @@ module Value = struct
       | `Fast a, `Fast b ->
         `Fast (fun (x,y) -> B.List [a x; b y])
       | _ ->
-        `Slow (fun (x,y) -> serialize a x >>= fun x -> serialize b y >|= BM.mk_pair x)
+        `Slow (fun (x,y) -> serialize a x
+          >>= fun x -> serialize b y >|= BM.mk_pair x)
     in
     make descr
       ~serialize
@@ -491,6 +493,8 @@ let compute_name fun_name l =
   let b = B.List (B.String fun_name :: l) in
   B.encode_to_string b
 
+(* TODO: generalize this, put the operation "validate" into
+   the {!Value.ops} type *)
 (* check if [f] is a [file_state] that doesn't correspond to the actual
    content of the disk *)
 let is_invalid_file_ref f =
@@ -506,7 +510,7 @@ let is_invalid_file_ref f =
     compute_file_state_ fs.fs_path
     >|= function
     | Error _ -> true  (* file not present, etc. *)
-    | Ok fs' -> fs'.fs_hash <> fs.fs_hash
+    | Ok (_,fs') -> fs'.fs_hash <> fs.fs_hash
 
 (*
    - compute a string [s] out of computation and dependencies [to_string]
@@ -562,7 +566,8 @@ f
     Storage.get storage h_computation_name >>>=
     function
     | None ->
-      (* not in cache, perform computation (possibly acquiring the "limit" first *)
+      (* not in cache, perform computation (possibly acquiring
+         the "limit" first) *)
       Maki_log.logf 3
         (fun k->k "could not find `%s` in storage %s"
             computation_name (Storage.name storage));
@@ -577,7 +582,7 @@ f
         let open Res_ in
         BM.decode_bencode s >>= fun b ->
         cache_value_of_bencode b >>= fun cv ->
-        Value.of_string op cv.cv_data >|= fun res -> res,cv.cv_data
+        Value.of_string op cv.cv_data >|= fun res -> res, cv.cv_data
       in
       let fut_res = Lwt.return res in
       fut_res >>>= fun (_,cv_data) ->
