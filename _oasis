@@ -33,3 +33,12 @@ Executable maki_display
   Install:        true
   BuildDepends:   maki
 
+Executable test_fib
+  Path:           tests/
+  MainIs:         test_fib.ml
+  CompiledObject: best
+  Install:        false
+  Build$:         flag(tests)
+  BuildDepends:   maki
+
+

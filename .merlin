@@ -1,6 +1,7 @@
 S src/core
 S src/gc
-B _build/src/**
+S tests
+B _build/**
 PKG lwt.unix
 PKG sha
 PKG result
