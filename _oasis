@@ -16,7 +16,8 @@ Synopsis:    persistent incremental computations, for repeatable tests and bench
 
 Library maki
   Path:         src/core/
-  Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log, Maki_bencode
+  Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log, Maki_bencode,
+                Maki_utils
   BuildDepends: lwt.unix, lwt.preemptive, sha, bencode, result, threads
 
 Executable maki_gc
@@ -41,4 +42,14 @@ Executable test_fib
   Build$:         flag(tests)
   BuildDepends:   maki
 
+Document maki
+  Title:                Maki docs
+  Type:                 ocamlbuild (0.3)
+  BuildTools+:          ocamldoc
+  Build$:               flag(docs)
+  Install:              true
+  XOCamlbuildPath:      .
+  XOCamlbuildExtraArgs:
+    "-docflags '-colorize-code -short-functors -charset utf-8'"
+  XOCamlbuildLibraries: maki
 
