@@ -25,7 +25,7 @@ let default_logger = {
             Format.kfprintf
               (fun _ -> ())
               debug_fmt_
-              ("@[<2>maki@ " ^^ fmt ^^ "@]@."))
+              ("@[<2>maki:@ " ^^ fmt ^^ "@]@."))
       )
   )
 }

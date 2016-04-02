@@ -466,6 +466,7 @@ let bencode_of_cache_value c =
     [ "gc_info", bencode_of_gc_info c.cv_gc_info
     ; "deps", BM.mk_list (List.map BM.mk_str c.cv_deps)
     ; "data", BM.mk_str c.cv_data
+    ; "name", BM.mk_str c.cv_fun_name
     ]
 
 (* [s] is a serialized cached value, turn it into a [cache_value] *)
@@ -473,7 +474,7 @@ let cache_value_of_bencode b : cache_value or_error =
   let open Res_ in
   match b with
     | B.Dict l ->
-      BM.assoc "lifetime" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
+      BM.assoc "gc_info" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
       BM.assoc "deps" l >>= BM.as_list >>= map_l BM.as_str >>= fun cv_deps ->
       BM.assoc "data" l >>= BM.as_str >>= fun cv_data ->
       BM.assoc "name" l >>= BM.as_str >>= fun cv_fun_name ->
