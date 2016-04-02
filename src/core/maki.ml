@@ -645,6 +645,7 @@ type gc_state = (string, gc_cell) Hashtbl.t
 
 (* find the set of roots, collect the graph in RAM *)
 let gc_collect_roots now s : gc_state Lwt.t =
+  Maki_log.log 3 "gc: collecting roots...";
   let state = Hashtbl.create 256 in
   Storage.fold s ~x:()
     ~f:(fun () (key, value) ->
@@ -670,39 +671,19 @@ let gc_collect_roots now s : gc_state Lwt.t =
           | Error e -> Lwt.fail e
           | Ok () -> Lwt.return_unit
      )
-  >|= fun () -> state
-
-(* transitive closure of graph: ensure that if [k -> deps] is
-   in [m], then each element of [deps] is in [m] too, and recursively. *)
-let trans_closure g =
-  (* auxiliary function, ensures [k] and its recursive dependencies are alive *)
-  let rec aux k =
-    let cell = Hashtbl.find g k in
-    match cell.gc_status with
-      | `Alive -> () (* has been taken care of already *)
-      | `Dead ->
-        (* traverse *)
-        cell.gc_status <- `Alive;
-        List.iter aux cell.gc_deps
-      | `Root ->
-        List.iter aux cell.gc_deps
-  in
-  Hashtbl.iter
-    (fun k cell ->
-       match cell.gc_status with
-         | `Root -> aux k (* make it alive! *)
-         | `Dead
-         | `Alive -> ())
-    g
+  >|= fun () ->
+  Maki_log.logf 3
+    (fun k->k "root collection is done (%d entries)" (Hashtbl.length state));
+  state
 
 let gc_storage ?(remove_file=false) s =
   let now = Unix.gettimeofday () in
   gc_collect_roots now s >>= fun st ->
-  trans_closure st;
   (* actually collect dead cells *)
   let n_kept = ref 0 in
   let n_removed = ref 0 in
   let err = ref None in
+  Maki_log.log 3 "start collection of dead values";
   Hashtbl.iter
     (fun k c ->
        match c.gc_status with
