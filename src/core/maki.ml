@@ -483,6 +483,15 @@ let cache_value_of_bencode b : cache_value or_error =
       return {cv_data; cv_deps; cv_gc_info; cv_fun_name}
     | _ -> Error (BM.Maki_error "expected cache_value")
 
+let cache_value_lifetime c =
+  match c.cv_gc_info with
+    | Keep  -> `Keep
+    | KeepUntil t -> `KeepUntil t
+    | CanDrop  -> `CanDrop
+let cache_value_fun_name c = c.cv_fun_name
+let cache_value_deps c = c.cv_deps
+let cache_value_data c = c.cv_data
+
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
 let compute_name fun_name l =

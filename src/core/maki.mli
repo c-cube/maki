@@ -200,6 +200,19 @@ val call_exn :
   'res Lwt.t
 (** Same as {!call} but raises the exception instead of wrapping it in Error *)
 
+(** {2 On-Storage Values} *)
+
+type cache_value
+
+val cache_value_of_bencode : Bencode.t -> cache_value or_error
+
+val bencode_of_cache_value : cache_value -> Bencode.t
+
+val cache_value_lifetime : cache_value -> lifetime
+val cache_value_fun_name : cache_value -> string (** function used to compute *)
+val cache_value_deps : cache_value -> string list (** dependencies *)
+val cache_value_data : cache_value -> string (** the value itself *)
+
 (** {2 GC}
 
     Garbage Collection for the stored values. It needs to be called
