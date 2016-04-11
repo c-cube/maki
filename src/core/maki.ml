@@ -228,6 +228,7 @@ module Value = struct
        and compute hash if timestamp changed or file is not in cache *)
     make_slow "file"
       ~serialize:(fun f ->
+        let f = abspath f in
         compute_file_state_ f
         >>= Maki_lwt_err.unwrap_res
         >|= fun (_, fs) -> bencode_of_fs fs)
@@ -237,7 +238,7 @@ module Value = struct
 
   (* turn [f], a potentially relative path to a program, into an absolute path *)
   let find_program_path_ f =
-    if Filename.is_relative f
+    if Filename.is_relative f && not (Filename.is_implicit f)
     then
       shellf "which '%s'" f >>= fun (out,_,errcode) ->
       if errcode=0
