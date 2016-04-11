@@ -134,8 +134,14 @@ let default_ ?dir () =
     | None ->
       try Sys.getenv env_var_
       with Not_found ->
-        let dir = try Sys.getenv "HOME" with Not_found -> "/tmp/" in
-        Filename.concat dir (Filename.concat ".cache" "maki")
+        let dir =
+          try Sys.getenv "XDG_CACHE_HOME"
+          with Not_found ->
+            Filename.concat
+              (try Sys.getenv "HOME" with Not_found -> "/tmp/")
+              ".cache"
+        in
+        Filename.concat dir "maki"
   in
   Default.create dir
 
