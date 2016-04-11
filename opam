@@ -6,6 +6,7 @@ maintainer: "simon.cruanes@inria.fr"
 build: [
     ["./configure"
         "--prefix" prefix
+        "--%{yojson:enable}%-yojson"
     ]
     [make "build"]
 ]
@@ -27,6 +28,9 @@ depends: [
     "bencode"
     "sha"
     "base-threads"
+]
+depopts: [
+    "yojson"
 ]
 tags: [ "incremental" "persistent" "memoization" ]
 homepage: "https://github.com/c-cube/maki/"

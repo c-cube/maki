@@ -14,11 +14,22 @@ XOCamlbuildExtraArgs: "-j 0"
 
 Synopsis:    persistent incremental computations, for repeatable tests and benchmarks
 
+Flag "yojson"
+  Description:  enable interface to Yojson
+  Default:      false
+
 Library maki
   Path:         src/core/
   Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log, Maki_bencode,
                 Maki_utils
   BuildDepends: lwt.unix, lwt.preemptive, sha, bencode, result, threads
+
+Library "maki_yojson"
+  Path:         src/json
+  Modules:      Maki_yojson
+  FindlibName:  yojson
+  FindlibParent:maki
+  BuildDepends: maki, yojson
 
 Executable maki_gc
   Path:           src/tools/
@@ -51,5 +62,5 @@ Document maki
   XOCamlbuildPath:      .
   XOCamlbuildExtraArgs:
     "-docflags '-colorize-code -short-functors -charset utf-8'"
-  XOCamlbuildLibraries: maki
+  XOCamlbuildLibraries: maki, maki.yojson
 

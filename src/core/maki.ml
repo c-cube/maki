@@ -262,8 +262,9 @@ module Value = struct
           fs_of_bencode b >|= fun fs -> fs.fs_path)
 
   let marshal name =
+    let flags = [Marshal.Closures; Marshal.No_sharing; Marshal.Compat_32] in
     make_fast name
-      ~serialize:(fun x -> BM.mk_str (Marshal.to_string x []))
+      ~serialize:(fun x -> BM.mk_str (Marshal.to_string x flags))
       ~unserialize:(function
           | B.String s -> Marshal.from_string s 0
           | b -> BM.expected_b "string" b)

@@ -1,10 +1,13 @@
 S src/core
 S src/gc
+S src/json/
 S tests
 B _build/src/core
 B _build/src/gc
+B _build/src/json
 PKG lwt.unix
 PKG sha
 PKG result
 PKG bencode
+PKG yojson
 FLG -w +a-4-44
