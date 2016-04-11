@@ -439,6 +439,15 @@ type gc_info =
   | KeepUntil of time
   | CanDrop
 
+(* a < b? *)
+let gc_info_lt a b = match a, b with
+  | Keep, Keep
+  | _, CanDrop -> false
+  | _, Keep
+  | CanDrop, _ -> true
+  | Keep, _ -> false
+  | KeepUntil a, KeepUntil b -> a < b
+
 let bencode_of_gc_info = function
   | Keep -> B.String "keep"
   | KeepUntil t -> B.List [B.String "keep_until"; B.String (string_of_float t)]
@@ -560,6 +569,22 @@ f
   (* compute the "name" of the computation *)
   compute_name fun_name deps >>= fun computation_name ->
   let h_computation_name = Sha1.string computation_name |> Sha1.to_hex in
+  let cv_gc_info = match lifetime with
+    | `CanDrop -> CanDrop
+    | `Keep -> Keep
+    | `KeepUntil t -> KeepUntil t
+    | `KeepFor t ->
+      let now = Unix.gettimeofday () in
+      KeepUntil (now +. t)
+  in
+  let save_cv storage cv =
+    let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
+    Maki_log.logf 3
+      (fun k->k "save result `%s` into storage %s (gc_info: %s)"
+          computation_name (Storage.name storage)
+          (bencode_of_gc_info cv.cv_gc_info |> B.encode_to_string));
+    Storage.set storage h_computation_name res_serialized
+  in
   (* compute the result of calling the function, or retrieve the result in
      cache. This returns a [('a * string) or_error Lwt.t] where
      the string is the serialization of the ['a] *)
@@ -570,23 +595,10 @@ f
     end >>= fun res ->
     Value.to_string op res >>= fun cv_data ->
     Lwt_list.map_p Value.to_string_packed deps >>= fun cv_deps ->
-    let cv_gc_info = match lifetime with
-      | `CanDrop -> CanDrop
-      | `Keep -> Keep
-      | `KeepUntil t -> KeepUntil t
-      | `KeepFor t ->
-        let now = Unix.gettimeofday () in
-        KeepUntil (now +. t)
-    in
     let cv = {cv_gc_info; cv_deps; cv_data; cv_fun_name=fun_name; cv_tags} in
-    let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
-    Maki_log.logf 3
-      (fun k->k "save result `%s` into storage %s (gc_info: %s)"
-          computation_name (Storage.name storage)
-          (bencode_of_gc_info cv_gc_info |> B.encode_to_string));
-    Storage.set storage h_computation_name res_serialized
+    save_cv storage cv
     >>>= fun () ->
-    Lwt.return (Ok (res, cv_data))
+    Lwt.return (Ok (res, cv))
   in
   (* check on-disk cache *)
   let check_cache_or_compute () =
@@ -600,7 +612,6 @@ f
             computation_name (Storage.name storage));
       compute_memoized ()
     | Some s ->
-      (* TODO: if cv.cv_gc_info = KeepUntil, refresh timestamp *)
       Maki_log.logf 3
         (fun k->k "found result of `%s` in storage %s"
             computation_name (Storage.name storage));
@@ -609,20 +620,31 @@ f
         let open Res_ in
         BM.decode_bencode s >>= fun b ->
         cache_value_of_bencode b >>= fun cv ->
-        Value.of_string op cv.cv_data >|= fun res -> res, cv.cv_data
+        Value.of_string op cv.cv_data >|= fun res -> res, cv
       in
       let fut_res = Lwt.return res in
-      fut_res >>>= fun (_,cv_data) ->
+      fut_res >>>= fun (_,cv) ->
       (* if result is a file, check that file exists, and that
          it's the same as expected. Otherwise recompute (calling
          compute_memoized recursively) *)
-      is_invalid_file_ref cv_data >>= fun invalid ->
+      is_invalid_file_ref cv.cv_data >>= fun invalid ->
       if invalid
       then (
         Maki_log.logf 3
-          (fun k->k "cached file %s is invalid, recompute" cv_data);
+          (fun k->k "cached file %s is invalid, recompute" cv.cv_data);
         compute_memoized ()
-      ) else fut_res
+      ) else (
+        (* if new lifetime extends longer than res.cv_gc_info, refresh *)
+        let erase_val =
+          if gc_info_lt cv.cv_gc_info cv_gc_info
+          then
+            let cv = {cv with cv_gc_info} in
+            save_cv storage cv
+          else Lwt.return (Ok ())
+        in
+        erase_val >>>= fun () ->
+        fut_res
+      )
   in
   (* check memo table *)
   try
@@ -641,7 +663,7 @@ f
     (* ensure that when [res] terminates, [res_serialized] is updated *)
     Lwt.on_any res
       (function
-        | Ok (_,str) -> Lwt.wakeup promise_serialized (Ok str)
+        | Ok (_,cv) -> Lwt.wakeup promise_serialized (Ok cv.cv_data)
         | Error e -> Lwt.wakeup promise_serialized (Error e))
       (fun e -> Lwt.wakeup promise_serialized (Error e));
     res >>|= fst
