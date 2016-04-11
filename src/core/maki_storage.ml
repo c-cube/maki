@@ -134,7 +134,8 @@ let default_ ?dir () =
     | None ->
       try Sys.getenv env_var_
       with Not_found ->
-        ".maki/"
+        let dir = try Sys.getenv "HOME" with Not_found -> "/tmp/" in
+        Filename.concat dir (Filename.concat ".cache" "maki")
   in
   Default.create dir
 
