@@ -460,6 +460,7 @@ type cache_value = {
   cv_fun_name: string; (* computed from what? *)
   cv_deps: string list; (* dependencies used to compute this value *)
   cv_data: string; (* the actual data *)
+  cv_tags: string list; (* tags attached to this particular value *)
 }
 
 (* serialize [c] into Bencode *)
@@ -469,6 +470,7 @@ let bencode_of_cache_value c =
     ; "deps", BM.mk_list (List.map BM.mk_str c.cv_deps)
     ; "data", BM.mk_str c.cv_data
     ; "name", BM.mk_str c.cv_fun_name
+    ; "tags", BM.mk_list (List.map BM.mk_str c.cv_tags)
     ]
 
 (* [s] is a serialized cached value, turn it into a [cache_value] *)
@@ -480,7 +482,8 @@ let cache_value_of_bencode b : cache_value or_error =
       BM.assoc "deps" l >>= BM.as_list >>= map_l BM.as_str >>= fun cv_deps ->
       BM.assoc "data" l >>= BM.as_str >>= fun cv_data ->
       BM.assoc "name" l >>= BM.as_str >>= fun cv_fun_name ->
-      return {cv_data; cv_deps; cv_gc_info; cv_fun_name}
+      BM.assoc_or (B.List []) "tags" l |> BM.as_list >>= map_l BM.as_str >>= fun cv_tags ->
+      return {cv_data; cv_deps; cv_gc_info; cv_fun_name; cv_tags}
     | _ -> Error (BM.Maki_error "expected cache_value")
 
 let cache_value_lifetime c =
@@ -491,6 +494,7 @@ let cache_value_lifetime c =
 let cache_value_fun_name c = c.cv_fun_name
 let cache_value_deps c = c.cv_deps
 let cache_value_data c = c.cv_data
+let cache_value_tags c = c.cv_tags
 
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
@@ -534,6 +538,7 @@ let call
 ?(storage=Storage.get_default ())
 ?(lifetime=`CanDrop)
 ?limit
+?tags:(cv_tags=[])
 ~name:fun_name
 ~deps
 ~op
@@ -560,7 +565,7 @@ f
         let now = Unix.gettimeofday () in
         KeepUntil (now +. t)
     in
-    let cv = {cv_gc_info; cv_deps; cv_data; cv_fun_name=fun_name} in
+    let cv = {cv_gc_info; cv_deps; cv_data; cv_fun_name=fun_name; cv_tags} in
     let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
     Maki_log.logf 3
       (fun k->k "save result `%s` into storage %s (gc_info: %s)"
@@ -628,8 +633,8 @@ f
       (fun e -> Lwt.wakeup promise_serialized (Error e));
     res >>|= fst
 
-let call_exn ?storage ?lifetime ?limit ~name ~deps ~op f =
-  call ?storage ?lifetime ?limit ~name ~deps ~op f
+let call_exn ?storage ?lifetime ?limit ?tags ~name ~deps ~op f =
+  call ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
   >>= function
   | Ok x -> Lwt.return x
   | Error e -> Lwt.fail e

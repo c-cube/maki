@@ -172,6 +172,7 @@ val call :
   ?storage:Storage.t ->
   ?lifetime:lifetime ->
   ?limit:Limit.t ->
+  ?tags:string list ->
   name:string ->
   deps:Value.t list ->
   op:'res Value.ops ->
@@ -193,6 +194,7 @@ val call_exn :
   ?storage:Storage.t ->
   ?lifetime:lifetime ->
   ?limit:Limit.t ->
+  ?tags:string list ->
   name:string ->
   deps:Value.t list ->
   op:'res Value.ops ->
@@ -212,6 +214,7 @@ val cache_value_lifetime : cache_value -> lifetime
 val cache_value_fun_name : cache_value -> string (** function used to compute *)
 val cache_value_deps : cache_value -> string list (** dependencies *)
 val cache_value_data : cache_value -> string (** the value itself *)
+val cache_value_tags : cache_value -> string list  (** tags attached to this value *)
 
 (** {2 GC}
 

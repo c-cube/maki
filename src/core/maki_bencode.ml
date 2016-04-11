@@ -16,6 +16,10 @@ let assoc k l =
   try Ok (List.assoc k l)
   with e -> Error e
 
+let assoc_or default k l =
+  try List.assoc k l
+  with _ -> default
+
 let as_str = function
   | B.String s -> Ok s
   | _ -> Error (Maki_error "expected string")

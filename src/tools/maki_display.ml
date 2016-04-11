@@ -23,11 +23,17 @@ let print_entries l =
       Format.fprintf out "keep for %.1f s" (t -. now)
     | `CanDrop -> Format.pp_print_string out "can drop"
     | `Keep -> Format.pp_print_string out "keep"
+  and pp_tags out = function
+    | [] -> ()
+    | l ->
+      Format.fprintf out ", tags(@[<hv>%a)"
+        (Format.pp_print_list Format.pp_print_string) l
   in
   let pp_pair out (k,c) =
-    Format.fprintf out "@[<hv2>`%s` ->@ `%s`@ [fun: %s, %a]@]"
+    Format.fprintf out "@[<hv2>`%s` ->@ `%s`@ [fun: %s, %a%a]@]"
       k (Maki.cache_value_data c) (Maki.cache_value_fun_name c)
       pp_lifetime (Maki.cache_value_lifetime c)
+      pp_tags (Maki.cache_value_tags c)
   in
   Format.printf "@[<v2>entries:@ %a@]@."
     (Format.pp_print_list pp_pair) l
