@@ -316,6 +316,17 @@ module Value = struct
               l
           | b -> BM.expected_b descr b)
 
+  let map ?descr f g op =
+    let descr = match descr with Some d -> d | None -> op.descr in
+    let serialize = match op.serialize with
+      | `Fast s -> `Fast (fun x -> s (f x))
+      | `Slow s -> `Slow (fun x -> s (f x))
+    in
+    { descr;
+      serialize;
+      unserialize=(fun b -> Res_.(op.unserialize b >|= g));
+    }
+
   let serialize op x = match op.serialize with
     | `Fast f -> Lwt.return (f x)
     | `Slow f -> f x

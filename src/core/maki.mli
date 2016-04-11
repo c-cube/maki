@@ -84,6 +84,11 @@ module Value : sig
   val list : 'a ops -> 'a list ops
   val assoc : 'a ops -> (string * 'a) list ops
 
+  val map : ?descr:string -> ('a -> 'b) -> ('b -> 'a) -> 'b ops -> 'a ops
+  (** [map f g op] encodes [x] using [op.encode x], and decodes [y] by
+      [g (op.decode y)]
+      @param descr optional description, otherwise [op.descr] is used *)
+
   val file : path ops
   (** A {b reference} to some file content. This should be compared by
       hash of the file content *)
