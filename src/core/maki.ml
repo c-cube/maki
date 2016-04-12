@@ -238,7 +238,7 @@ module Value = struct
 
   (* turn [f], a potentially relative path to a program, into an absolute path *)
   let find_program_path_ f =
-    if Filename.is_relative f && not (Filename.is_implicit f)
+    if Filename.is_relative f && Filename.is_implicit f
     then
       shellf "which '%s'" f >>= fun (out,_,errcode) ->
       if errcode=0
