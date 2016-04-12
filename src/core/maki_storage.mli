@@ -53,6 +53,10 @@ val fold : t -> f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t
 val flush_cache : t -> unit
 (** Flush in-process cache, if any *)
 
+val none : t
+(** A dummy storage which does not store any result, thus forcing
+    every computation to run. *)
+
 val default : ?dir:path -> unit -> t Lwt.t
 (** [default ?dir ()] creates a new default storage (one file per pair)
     @param dir if provided, set the directory used for storing files

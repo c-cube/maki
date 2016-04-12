@@ -128,6 +128,15 @@ module Default = struct
     }
 end
 
+let none = {
+  name = "dummy storage";
+  get = (fun _ -> Lwt.return (Result.Ok None));
+  set = (fun _ _ -> Lwt.return (Result.Ok ()));
+  remove = (fun _ -> Lwt.return_unit);
+  fold = (fun ~f:_ ~x -> Lwt.return x);
+  flush_cache = (fun () -> ());
+}
+
 let default_ ?dir () =
   let dir = match dir with
     | Some d -> d
