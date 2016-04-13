@@ -85,7 +85,7 @@ module Value : sig
   val assoc : 'a ops -> (string * 'a) list ops
 
   val map : ?descr:string -> ('a -> 'b) -> ('b -> 'a) -> 'b ops -> 'a ops
-  (** [map f g op] encodes [x] using [op.encode x], and decodes [y] by
+  (** [map f g op] encodes [x] using [op.encode (f x)], and decodes [y] by
       [g (op.decode y)]
       @param descr optional description, otherwise [op.descr] is used *)
 
