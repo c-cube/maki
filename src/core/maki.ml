@@ -221,6 +221,17 @@ module Value = struct
               end
             | b -> BM.expected_b "bool" b)
 
+  (* TODO: use the hexadecimal output of Printf when available ? *)
+  let float =
+    make_fast "float"
+      ~serialize:(fun f -> B.String Int64.((to_string @@ bits_of_float f)))
+      ~unserialize:(function
+          | B.String s ->
+            begin try Ok Int64.(float_of_bits @@ of_string s)
+              with Failure _ -> BM.expected_s "float" s
+            end
+          | b -> BM.expected_b "float" b)
+
   (* special behavior for files: comparison is done be by timestamp+hash *)
   let file =
     (* serialize:

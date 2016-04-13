@@ -81,6 +81,7 @@ module Value : sig
   val int : int ops
   val string : string ops
   val bool : bool ops
+  val float : float ops
   val list : 'a ops -> 'a list ops
   val assoc : 'a ops -> (string * 'a) list ops
 
