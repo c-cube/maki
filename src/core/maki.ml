@@ -19,6 +19,7 @@ type 'a lwt_or_error = 'a or_error Lwt.t
 
 module Res_ = struct
   let return x = Ok x
+  let fail e = Error e
   let (<*>) f x = match f, x with
     | Ok f, Ok x -> Ok (f x)
     | Error e, _
@@ -567,7 +568,7 @@ let is_invalid_file_ref f =
      * if it does, read its content, deserialize result with [op] and return it
      * otherwise, compute result, write it in [h], and return it
 *)
-let call
+let call_
 ?(storage=Storage.get_default ())
 ?(lifetime=`CanDrop)
 ?limit
@@ -670,7 +671,7 @@ f
        compute the same value *)
     Hashtbl.add memo_table_ h_computation_name res_serialized;
     (* compute result *)
-    let res = check_cache_or_compute () in
+    let res = check_cache_or_compute() in
     (* ensure that when [res] terminates, [res_serialized] is updated *)
     Lwt.on_any res
       (function
@@ -679,8 +680,22 @@ f
       (fun e -> Lwt.wakeup promise_serialized (Error e));
     res >>|= fst
 
-let call_exn ?storage ?lifetime ?limit ?tags ~name ~deps ~op f =
-  call ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
+let call
+    ?(bypass=false) ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
+  =
+  if bypass
+  then
+    Lwt.catch
+      (fun () ->
+         let f () = f() >|= Res_.return in
+         match limit with
+           | None -> f ()
+           | Some l -> Limit.acquire l f)
+      (fun e -> Lwt.return (Res_.fail e))
+  else call_ ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
+
+let call_exn ?bypass ?storage ?lifetime ?limit ?tags ~name ~deps ~op f =
+  call ?bypass ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
   >>= function
   | Ok x -> Lwt.return x
   | Error e -> Lwt.fail e

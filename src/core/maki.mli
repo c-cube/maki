@@ -175,6 +175,7 @@ type lifetime =
   ]
 
 val call :
+  ?bypass:bool ->
   ?storage:Storage.t ->
   ?lifetime:lifetime ->
   ?limit:Limit.t ->
@@ -185,6 +186,7 @@ val call :
   (unit -> 'res Lwt.t) ->
   'res or_error Lwt.t
 (** Call the function iff its result has not been cached yet
+    @param bypass if true, then cache is disabled
     @param storage the storage used for caching values
       (default [Storage.get_default ()])
     @param lifetime how long to keep the cached value (defautl: CanDrop)
@@ -197,6 +199,7 @@ val call :
 *)
 
 val call_exn :
+  ?bypass:bool ->
   ?storage:Storage.t ->
   ?lifetime:lifetime ->
   ?limit:Limit.t ->
