@@ -1,13 +1,18 @@
 S src/core
 S src/gc
 S src/json/
+S src/demo_build/
 S tests
 B _build/src/core
 B _build/src/gc
 B _build/src/json
+B _build/src/demo_build
 PKG lwt.unix
 PKG sha
 PKG result
 PKG bencode
 PKG yojson
+PKG containers
+PKG oasis-parser
+PKG lwt.ppx
 FLG -w +a-4-44

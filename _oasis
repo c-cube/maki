@@ -18,6 +18,10 @@ Flag "yojson"
   Description:  enable interface to Yojson
   Default:      false
 
+Flag "demo_build"
+  Description:  build the toy build system on top of maki+oasis-parser
+  Default:      false
+
 Library maki
   Path:         src/core/
   Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log, Maki_bencode,
@@ -44,6 +48,14 @@ Executable maki_display
   CompiledObject: best
   Install:        true
   BuildDepends:   maki
+
+Executable maki_build
+  Path:           src/demo_build/
+  MainIs:         maki_build.ml
+  CompiledObject: best
+  Install:        false
+  Build$:         flag(demo_build)
+  BuildDepends:   maki, containers, containers.data, oasis-parser, lwt.ppx
 
 Executable test_fib
   Path:           tests/
