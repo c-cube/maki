@@ -44,3 +44,10 @@ setup.exe: setup.ml
 .PHONY: build doc test all install uninstall reinstall clean distclean configure
 
 # OASIS_STOP
+
+upload-doc: doc
+	git checkout gh-pages && \
+	  rm -rf dev/ && \
+	  mkdir -p dev && \
+	  cp -r maki.docdir/* dev/ && \
+	  git add --all dev
