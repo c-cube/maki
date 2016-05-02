@@ -18,6 +18,8 @@
 <link title="Maki_utils" rel="Chapter" href="Maki_utils.html">
 <link title="Maki_yojson" rel="Chapter" href="Maki_yojson.html"><link title="Basic types" rel="Section" href="#2_Basictypes">
 <link title="Controlling Parallelism" rel="Section" href="#2_ControllingParallelism">
+<link title="Values" rel="Section" href="#2_Values">
+<link title="On-Disk storage" rel="Section" href="#2_OnDiskstorage">
 <link title="Time Utils" rel="Section" href="#2_TimeUtils">
 <link title="Memoized Functions" rel="Section" href="#2_MemoizedFunctions">
 <link title="On-Storage Values" rel="Section" href="#2_OnStorageValues">
@@ -67,15 +69,24 @@
 <br>
 <h2 id="2_ControllingParallelism">Controlling Parallelism</h2><br>
 
-<pre><span class="keyword">module</span> <a href="Maki.Limit.html">Limit</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Limit.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
-<pre><span class="keyword">module</span> <a href="Maki.Value.html">Value</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Value.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
-Values
-</div>
+<pre><span class="keyword">module</span> <a href="Maki.Limit.html">Limit</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Limit.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<h2 id="2_Values">Values</h2>
+<p>
 
-<pre><span class="keyword">module</span> <a href="Maki.Storage.html">Storage</a>: <code class="type"><a href="Maki_storage.html">Maki_storage</a></code></pre><div class="info">
-On-Disk storage
-</div>
-<br>
+    Maki deals with functions that take and return values of any
+    type that provides a <code class="code"><span class="keywordsign">'</span>a <span class="constructor">Value</span>.t</code> implementation;
+    that is, values that we can serialize, unserialize, and hash.
+    The reason is that values are stored on disk for memoization purposes.<br>
+
+<pre><span class="keyword">module</span> <a href="Maki.Value.html">Value</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Value.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<h2 id="2_OnDiskstorage">On-Disk storage</h2>
+<p>
+
+    We use a generic interface for on-disk storage, in the form of a
+    dictionary <code class="code">string <span class="keywordsign">-&gt;</span> string</code>. The default storage just uses
+    one file per pair.<br>
+
+<pre><span class="keyword">module</span> <a href="Maki.Storage.html">Storage</a>: <code class="type"><a href="Maki_storage.html">Maki_storage</a></code></pre><br>
 <h2 id="2_TimeUtils">Time Utils</h2><br>
 
 <pre><span class="keyword">module</span> <a href="Maki.Time.html">Time</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
