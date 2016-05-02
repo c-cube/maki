@@ -738,7 +738,7 @@ let gc_collect_roots now s : gc_state Lwt.t =
           let gc_status = match cv.cv_gc_info with
             | Keep -> `Root
             | KeepUntil t -> if t >= now then `Root else `Dead
-            | CanDrop -> `Root
+            | CanDrop -> `Dead
           in
           Hashtbl.add state key {gc_deps=cv.cv_deps; gc_status; gc_path};
         in
