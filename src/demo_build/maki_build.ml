@@ -67,7 +67,7 @@ let find_deps ~deps ~path m : string list Lwt.t =
   let pdeps = CCList.flat_map (fun d -> ["-package"; d]) deps in
   (* call "ocamldep" *)
   Maki.call_exn ~name:"find_deps"
-    ~deps:[V.argv0; V.pack_file file; V.pack_set V.string pdeps]
+    ~deps:[V.pack_file file; V.pack_set V.string pdeps]
     ~op:V.(set string)
     (fun () ->
        shellf "@[<h>ocamlfind ocamldep -modules %a %s@]"
@@ -104,7 +104,7 @@ let build_interface ~path ~deps m : Maki.path Lwt.t =
   let file_cmi = module_to_cmi ~path m in
   Maki.call_exn
     ~name:"build_interface"
-    ~deps:[V.argv0; V.pack_file file_mli; V.pack_set V.string deps]
+    ~deps:[V.pack_file file_mli; V.pack_set V.string deps]
     ~op:V.file
     (fun () ->
        shellf "@[<h>ocamlfind ocamlc -c -I %s %a %s -o %s@]"
@@ -134,7 +134,7 @@ let rec build_module ~path ~deps ~all_mods m : Maki.path Lwt.t =
   let file_cmo = module_to_cmo ~path m in
   Maki.call_exn
     ~name:"build_module"
-    ~deps:[V.argv0; V.pack_file file_ml;
+    ~deps:[V.pack_file file_ml;
            V.pack_set V.string deps; V.pack_set V.file m_deps']
     ~op:V.file
     (fun () ->
@@ -163,7 +163,7 @@ let build_lib ~deps ~path ~name modules =
   let file_out = Filename.concat path (name ^ ".cma") in
   Maki.call_exn
     ~name:"build_lib"
-    ~deps:[V.argv0; V.pack_list V.file l; V.pack_set V.string deps]
+    ~deps:[V.pack_list V.file l; V.pack_set V.string deps]
     ~op:V.file
     (fun () ->
        shellf "@[<h>ocamlfind ocamlc -a %a -o %s"
@@ -203,7 +203,7 @@ let build_exec ~deps ~path ~name:_ main_is : unit Lwt.t =
   let file_out = Filename.concat path (set_ext ~ext:".byte" main_is) in
   Maki.call_exn
     ~name:"build_exec"
-    ~deps:[V.argv0; V.pack_file file_in;
+    ~deps:[V.pack_file file_in;
            V.pack_set V.string m_deps'; V.pack_set V.file l]
     ~op:V.file
     (fun () ->
