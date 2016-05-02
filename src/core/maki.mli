@@ -43,6 +43,7 @@ end
     type that provides a {!'a Value.t} implementation;
     that is, values that we can serialize, unserialize, and hash.
     The reason is that values are stored on disk for memoization purposes. *)
+
 module Value : sig
   type 'a ops = {
     descr: string; (* description of 'a *)
@@ -134,6 +135,7 @@ end
     We use a generic interface for on-disk storage, in the form of a
     dictionary [string -> string]. The default storage just uses
     one file per pair. *)
+
 module Storage = Maki_storage
 
 (** {2 Time Utils} *)
