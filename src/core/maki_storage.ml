@@ -45,6 +45,7 @@ let set_exn t k v =
 
 module Default = struct
   type t = {
+    pool: unit Lwt_pool.t;
     dir: path;
     cache: (string, string option or_error) Hashtbl.t;
   }
@@ -54,7 +55,7 @@ module Default = struct
   let read_file_ f =
     Lwt_io.with_file ~mode:Lwt_io.input f (fun ic -> Lwt_io.read ic)
 
-  let get t k =
+  let get_ t k =
     try Lwt.return (Hashtbl.find t.cache k)
     with Not_found ->
       Lwt.catch
@@ -69,7 +70,9 @@ module Default = struct
       Hashtbl.add t.cache k res;
       res
 
-  let set t k v =
+  let get t k = Lwt_pool.use t.pool (fun _ -> get_ t k)
+
+  let set_ t k v =
     Lwt.catch
       (fun () ->
         let f = k_to_file t k in
@@ -78,12 +81,14 @@ module Default = struct
           ~perm:0o644
           (fun oc ->
             (* invalidate cache *)
-            Hashtbl.remove t.cache k;
+            Hashtbl.replace t.cache k (Ok(Some v));
             Lwt_io.write oc v >>= fun () ->
             Lwt_io.flush oc)
         >|= fun () -> Ok ()
       )
       (fun e -> Lwt.return (Error e))
+
+  let set t k v = Lwt_pool.use t.pool (fun _ -> set_ t k v)
 
   let remove t k =
     let f = k_to_file t k in
@@ -117,7 +122,12 @@ module Default = struct
     begin try Unix.mkdir dir 0o755
       with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
     end;
-    let t = {dir; cache=Hashtbl.create 256} in
+    let t =
+      {dir;
+       pool=Lwt_pool.create 24 (fun _ -> Lwt.return_unit);
+       cache=Hashtbl.create 256
+      }
+    in
     {
       name="shelf";
       get=get t;

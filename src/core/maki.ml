@@ -94,6 +94,9 @@ let last_mtime f : time or_error =
   try Ok (last_time_ f)
   with e -> Error e
 
+let errcode_of_status_ =
+  fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) -> c
+
 let shell ?timeout ?(stdin="") cmd =
   let cmd = "sh", [|"sh"; "-c"; cmd|] in
   Lwt_process.with_process_full ?timeout cmd
@@ -106,8 +109,10 @@ let shell ?timeout ?(stdin="") cmd =
        and close_in = Lwt_io.close p#stdin in
        stdout >>= fun o ->
        stderr >>= fun e ->
-       errcode >>= fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) ->
+       errcode >|= errcode_of_status_ >>= fun c ->
        close_in >>= fun _ ->
+       Lwt_io.close p#stdout >>= fun _ ->
+       Lwt_io.close p#stderr >>= fun _ ->
        Lwt.return (o, e, c))
 
 let shellf ?timeout ?stdin cmd =
@@ -148,26 +153,53 @@ let file_cache_ : file_cache = Hashtbl.create 128
 let compute_file_state_ f =
   Lwt.catch
     (fun () ->
-      let fs =
-        try
-          let time, fs = Hashtbl.find file_cache_ f in
-          let time' = last_time_ f in
-          ( if time' <> time
-            then sha1 f >|= Sha1.to_hex
-            else Lwt.return fs.fs_hash )
-          >|= fun hash ->
-          Ok (time', {fs with fs_hash=hash})
-        with Not_found ->
-          let time = last_time_ f in
-          sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
-          Ok (time, { fs_path=f; fs_hash})
-      in
-      Lwt.on_success fs
-        (function
-          | Ok x -> Hashtbl.replace file_cache_ f x
-          | Error _ -> ());
-      fs)
+       try
+         let time, fs = Hashtbl.find file_cache_ f in
+         let time' = last_time_ f in
+         ( if time' <> time
+           then sha1 f >|= Sha1.to_hex
+           else Lwt.return fs.fs_hash )
+         >|= fun hash ->
+         let fs = {fs with fs_hash=hash} in
+         Hashtbl.replace file_cache_ f (time', fs);
+         Ok (time', fs)
+       with Not_found ->
+         let time = last_time_ f in
+         sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
+         let fs = { fs_path=f; fs_hash} in
+         Hashtbl.replace file_cache_ f (time, fs);
+         Ok (time, fs)
+    )
     (fun e -> Lwt.return (Error e))
+
+(* program name -> path *)
+let path_tbl_ : (string, string or_error Lwt.t) Hashtbl.t = Hashtbl.create 24
+
+let path_pool_ = Lwt_pool.create 30 (fun _ -> Lwt.return_unit)
+
+exception Program_not_in_path of string
+
+(* turn [f], a potentially relative path to a program, into an absolute path *)
+let find_program_path_ f : string or_error Lwt.t =
+  if Filename.is_relative f && Filename.is_implicit f
+  then (
+    try Hashtbl.find path_tbl_ f
+    with Not_found ->
+      let fut =
+        Lwt_pool.use path_pool_
+          (fun _ ->
+             let p = Lwt_process.open_process_in ("", [|"which"; f|]) in
+             Lwt_io.read p#stdout >>= fun out ->
+             p#status >|= errcode_of_status_ >|= fun errcode ->
+             if errcode=0
+             then Ok (String.trim out)
+             else Error (Program_not_in_path f))
+      in
+      (* cache *)
+      Hashtbl.add path_tbl_ f fut;
+      fut
+  )
+  else Lwt.return (Ok f)
 
 module Value = struct
   type 'a ops = {
@@ -247,16 +279,6 @@ module Value = struct
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
-
-  (* turn [f], a potentially relative path to a program, into an absolute path *)
-  let find_program_path_ f =
-    if Filename.is_relative f && Filename.is_implicit f
-    then
-      shellf "which '%s'" f >>= fun (out,_,errcode) ->
-      if errcode=0
-      then Lwt.return (Ok (String.trim out))
-      else Lwt.return (Error Not_found)
-    else Lwt.return (Ok f)
 
   (* special behavior for programs: find the path to the binary,
      then behave like a file *)
