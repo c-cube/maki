@@ -250,10 +250,10 @@ val gc_storage : ?remove_file:bool -> Storage.t -> gc_stats or_error Lwt.t
 val last_mtime : path -> time or_error
 (** Last modification time of the file *)
 
-val sha1 : path -> Sha1.t Lwt.t
+val sha1 : path -> string Lwt.t
 (** [sha1 f] hashes the file [f] *)
 
-val sha1_of_string : string -> Sha1.t
+val sha1_of_string : string -> string
 (** hash the given string *)
 
 val abspath : path -> path

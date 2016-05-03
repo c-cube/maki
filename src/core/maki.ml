@@ -81,14 +81,16 @@ let sha1_pool_ = Limit.create 6
 (* fast sha1 on a file *)
 let sha1 f =
   Limit.acquire sha1_pool_
-    (fun () -> Lwt_preemptive.detach Sha1.file_fast f)
+    (fun () ->
+       Maki_log.logf 5 (fun k->k "compute sha1 of `%s`" f);
+       Lwt_preemptive.detach (fun () -> Sha1.file_fast f |> Sha1.to_hex) ())
 
 let abspath f =
   if Filename.is_relative f
   then Filename.concat (Sys.getcwd()) f
   else f
 
-let sha1_of_string s = Sha1.string s
+let sha1_of_string s = Sha1.string s |> Sha1.to_hex
 
 let last_mtime f : time or_error =
   try Ok (last_time_ f)
@@ -111,8 +113,6 @@ let shell ?timeout ?(stdin="") cmd =
        stderr >>= fun e ->
        errcode >|= errcode_of_status_ >>= fun c ->
        close_in >>= fun _ ->
-       Lwt_io.close p#stdout >>= fun _ ->
-       Lwt_io.close p#stderr >>= fun _ ->
        Lwt.return (o, e, c))
 
 let shellf ?timeout ?stdin cmd =
@@ -128,7 +128,7 @@ let shellf ?timeout ?stdin cmd =
 
 type file_state = {
   fs_path: path;
-  fs_hash: string; (* SHA1 in hex form *)
+  fs_hash: string Lwt.t; (* SHA1 in hex form *)
 }
 
 let fs_of_bencode = function
@@ -136,13 +136,14 @@ let fs_of_bencode = function
     let open Res_ in
     BM.assoc "path" l >>= BM.as_str >>= fun fs_path ->
     BM.assoc "hash" l >>= BM.as_str >>= fun fs_hash ->
-    Ok {fs_path; fs_hash}
+    Ok {fs_path; fs_hash=Lwt.return fs_hash}
   | b -> BM.expected_b "file_state" b
 
 let bencode_of_fs fs =
+  fs.fs_hash >|= fun h ->
   B.Dict
     [ "path", B.String fs.fs_path
-    ; "hash", B.String fs.fs_hash
+    ; "hash", B.String h
     ]
 
 (* cache for files: maps file name to hash + last modif *)
@@ -150,32 +151,35 @@ type file_cache = (string, time * file_state) Hashtbl.t
 
 let file_cache_ : file_cache = Hashtbl.create 128
 
-let compute_file_state_ f =
-  Lwt.catch
-    (fun () ->
-       try
-         let time, fs = Hashtbl.find file_cache_ f in
-         let time' = last_time_ f in
-         ( if time' <> time
-           then sha1 f >|= Sha1.to_hex
-           else Lwt.return fs.fs_hash )
-         >|= fun hash ->
-         let fs = {fs with fs_hash=hash} in
-         Hashtbl.replace file_cache_ f (time', fs);
-         Ok (time', fs)
-       with Not_found ->
-         let time = last_time_ f in
-         sha1 f >|= Sha1.to_hex >|= fun fs_hash ->
-         let fs = { fs_path=f; fs_hash} in
-         Hashtbl.replace file_cache_ f (time, fs);
-         Ok (time, fs)
+let find_tbl_ tbl k =
+  try Some (Hashtbl.find tbl k) with Not_found -> None
+
+let compute_file_state_ f : file_state or_error =
+  if not (Sys.file_exists f) then Error Not_found
+  else match find_tbl_ file_cache_ f with
+  | Some (time, fs) ->
+    (* cache hit, but is it up-to-date? *)
+    let time' = last_time_ f in
+    if time' <> time
+    then (
+      Maki_log.logf 5 (fun k->k "hash entry for `%s` invalidated: %.2f --> %.2f" f time time');
+      let fs_hash = sha1 f in
+      let fs = {fs with fs_hash} in
+      Hashtbl.replace file_cache_ f (time', fs);
+      Ok fs
     )
-    (fun e -> Lwt.return (Error e))
+    else Ok fs
+  | None ->
+    let time = last_time_ f in
+    let fs_hash = sha1 f in
+    let fs = { fs_path=f; fs_hash} in
+    Hashtbl.replace file_cache_ f (time, fs);
+    Ok fs
 
 (* program name -> path *)
 let path_tbl_ : (string, string or_error Lwt.t) Hashtbl.t = Hashtbl.create 24
 
-let path_pool_ = Lwt_pool.create 30 (fun _ -> Lwt.return_unit)
+let path_pool_ = Lwt_pool.create 100 (fun _ -> Lwt.return_unit)
 
 exception Program_not_in_path of string
 
@@ -188,6 +192,7 @@ let find_program_path_ f : string or_error Lwt.t =
       let fut =
         Lwt_pool.use path_pool_
           (fun _ ->
+             Maki_log.logf 5 (fun k->k "invoke `which` on `%s`" f);
              let p = Lwt_process.open_process_in ("", [|"which"; f|]) in
              Lwt_io.read p#stdout >>= fun out ->
              p#status >|= errcode_of_status_ >|= fun errcode ->
@@ -273,9 +278,9 @@ module Value = struct
     make_slow "file"
       ~serialize:(fun f ->
         let f = abspath f in
-        compute_file_state_ f
-        >>= Maki_lwt_err.unwrap_res
-        >|= fun (_, fs) -> bencode_of_fs fs)
+        match compute_file_state_ f with
+          | Error e -> Lwt.fail e
+          | Ok fs -> bencode_of_fs fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -288,9 +293,9 @@ module Value = struct
           find_program_path_ f >>= function
           | Error e -> Lwt.fail e
           | Ok p ->
-            compute_file_state_ p
-            >>= Maki_lwt_err.unwrap_res
-            >|= fun (_,fs) -> bencode_of_fs fs)
+            match compute_file_state_ p with
+              | Error e -> Lwt.fail e
+              | Ok fs -> bencode_of_fs fs)
       ~unserialize:(fun b ->
           let open Res_ in
           fs_of_bencode b >|= fun fs -> fs.fs_path)
@@ -576,10 +581,12 @@ let is_invalid_file_ref f =
   | Error _ -> Lwt.return_false (* not a file *)
   | Ok fs ->
     (* compare [fs] with actual current file state *)
-    compute_file_state_ fs.fs_path
-    >|= function
-    | Error _ -> true  (* file not present, etc. *)
-    | Ok (_,fs') -> fs'.fs_hash <> fs.fs_hash
+    match compute_file_state_ fs.fs_path with
+      | Error _ -> Lwt.return_true (* file not present, etc. *)
+      | Ok fs' ->
+        fs.fs_hash >>= fun f1 ->
+        fs'.fs_hash >|= fun f2 ->
+        f1 <> f2
 
 (*
    - compute a string [s] out of computation and dependencies [to_string]

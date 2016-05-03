@@ -124,7 +124,7 @@ module Default = struct
     end;
     let t =
       {dir;
-       pool=Lwt_pool.create 24 (fun _ -> Lwt.return_unit);
+       pool=Lwt_pool.create 100 (fun _ -> Lwt.return_unit);
        cache=Hashtbl.create 256
       }
     in
