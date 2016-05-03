@@ -76,7 +76,7 @@ let last_time_ f =
   s.Unix.st_mtime
 
 (* number of threads to use in parallel for computing Sha1 *)
-let sha1_pool_ = Limit.create 6
+let sha1_pool_ = Limit.create 20
 
 (* fast sha1 on a file *)
 let sha1 f =
@@ -580,13 +580,16 @@ let is_invalid_file_ref f =
   match fs with
   | Error _ -> Lwt.return_false (* not a file *)
   | Ok fs ->
+    Maki_log.logf 5 (fun k->k "check if file `%s` is up-to-date..." fs.fs_path);
     (* compare [fs] with actual current file state *)
     match compute_file_state_ fs.fs_path with
       | Error _ -> Lwt.return_true (* file not present, etc. *)
       | Ok fs' ->
         fs.fs_hash >>= fun f1 ->
         fs'.fs_hash >|= fun f2 ->
-        f1 <> f2
+        let res = f1 <> f2 in
+        Maki_log.logf 5 (fun k->k "file `%s` up-to-date? %B" fs.fs_path (not res));
+        res
 
 (*
    - compute a string [s] out of computation and dependencies [to_string]
@@ -618,6 +621,7 @@ f
       let now = Unix.gettimeofday () in
       KeepUntil (now +. t)
   in
+  (* save a value into the storage *)
   let save_cv storage cv =
     let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
     Maki_log.logf 3
@@ -633,12 +637,12 @@ f
     begin match limit with
       | None -> f ()
       | Some l -> Limit.acquire l f
-    end >>= fun res ->
+    end
+    >>= fun res ->
     Value.to_string op res >>= fun cv_data ->
     Lwt_list.map_p Value.to_string_packed deps >>= fun cv_deps ->
     let cv = {cv_gc_info; cv_deps; cv_data; cv_fun_name=fun_name; cv_tags} in
-    save_cv storage cv
-    >>>= fun () ->
+    save_cv storage cv >>= fun _ ->
     Lwt.return (Ok (res, cv))
   in
   (* check on-disk cache *)
@@ -676,14 +680,14 @@ f
         compute_memoized ()
       ) else (
         (* if new lifetime extends longer than res.cv_gc_info, refresh *)
-        let erase_val =
+        begin
           if gc_info_lt cv.cv_gc_info cv_gc_info
-          then
+          then (
             let cv = {cv with cv_gc_info} in
             save_cv storage cv
-          else Lwt.return (Ok ())
-        in
-        erase_val >>>= fun () ->
+          ) else Lwt.return (Ok ())
+        end
+        >>>= fun _ ->
         fut_res
       )
   in
