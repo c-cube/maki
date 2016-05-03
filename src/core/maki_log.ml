@@ -15,6 +15,8 @@ let set_level i = level_ := i
 
 let debug_fmt_ = Format.err_formatter
 
+let start = Unix.gettimeofday()
+
 let default_logger = {
   log=(
     fun i f ->
@@ -25,7 +27,7 @@ let default_logger = {
             Format.kfprintf
               (fun _ -> ())
               debug_fmt_
-              ("@[<2>maki:@ " ^^ fmt ^^ "@]@."))
+              ("@[<2>maki[%.3f]:@ " ^^ fmt ^^ "@]@.") (Unix.gettimeofday()-.start))
       )
   )
 }
