@@ -34,21 +34,28 @@ let shellf msg =
       Maki_log.logf 5 (fun k->k "run command `%s`" cmd);
       Maki.shell cmd)
 
+let limit = Maki.Limit.create 20
+
 (** {2 Basic building blocks} *)
 
 (* path+module name --> filename *)
 let module_to_ml ~path m =
   let n1 = Printf.sprintf "%s/%s.ml" path (String.uncapitalize m) in
   let n2 = Printf.sprintf "%s/%s.ml" path (String.capitalize m) in
-  if CCIO.File.exists n1 then n1
-  else if CCIO.File.exists n2 then n2
+  if Sys.file_exists n1 then n1
+  else if Sys.file_exists n2 then n2
   else failf "could not find .ml file for module %s/%s" path m
+
+(* can we find a .ml file for m? *)
+let has_ml_file ~path m =
+  try ignore (module_to_ml ~path m); true
+  with _ -> false
 
 let module_to_mli ~path m =
   let n1 = Printf.sprintf "%s/%s.mli" path (String.uncapitalize m) in
   let n2 = Printf.sprintf "%s/%s.mli" path (String.capitalize m) in
-  if CCIO.File.exists n1 then n1
-  else if CCIO.File.exists n2 then n2
+  if Sys.file_exists n1 then n1
+  else if Sys.file_exists n2 then n2
   else module_to_ml ~path m (* fall back to .ml *)
 
 let module_to_cmi ~path m =
@@ -66,8 +73,8 @@ let find_deps ~deps ~path m : string list Lwt.t =
   let file = module_to_ml ~path m in
   let pdeps = CCList.flat_map (fun d -> ["-package"; d]) deps in
   (* call "ocamldep" *)
-  Maki.call_exn ~name:"find_deps"
-    ~deps:[V.pack_file file; V.pack_set V.string pdeps]
+  Maki.call_exn ~name:"find_deps" ~limit
+    ~deps:[V.pack_program "ocamldep"; V.pack_file file; V.pack_set V.string pdeps]
     ~op:V.(set string)
     (fun () ->
        shellf "@[<h>ocamlfind ocamldep -modules %a %s@]"
@@ -83,6 +90,29 @@ let find_deps ~deps ~path m : string list Lwt.t =
   >|= fun l ->
   Maki_log.logf 5 (fun k->k "deps of %s/%s: %a" path m pp_strings l);
   l
+
+let find_local_deps ~deps ~path m : string list Lwt.t =
+  Maki.call_exn
+    ~name:"find_local_deps"
+    ~lifetime:(`KeepFor Maki.Time.(minutes 30))
+    ~deps:[V.pack_string m; V.pack_string path; V.pack_set V.string deps]
+    ~op:V.(set string)
+    (fun () ->
+       find_deps ~deps ~path m
+       >|= List.filter (has_ml_file ~path))
+
+(* find recursive deps (without duplicates) *)
+let rec find_local_deps_rec ~deps ~path m =
+  let%lwt mdeps = find_local_deps ~deps ~path m in
+  Maki.call_exn
+    ~name:"find_local_deps_rec"
+    ~deps:[V.pack_string m; V.pack_string path; V.pack_set V.string deps]
+    ~op:V.(set string)
+    (fun () ->
+       Lwt_list.map_p (find_local_deps_rec ~deps ~path) mdeps
+       >|= List.flatten
+       >|= (fun l->List.rev_append mdeps l)
+       >|= CCList.sort_uniq ~cmp:String.compare)
 
 (* find a topological ordering of given modules *)
 let topo_order ~path ~deps modules : string list Lwt.t =
@@ -103,38 +133,36 @@ let build_interface ~path ~deps m : Maki.path Lwt.t =
   let file_mli = module_to_mli ~path m in
   let file_cmi = module_to_cmi ~path m in
   Maki.call_exn
-    ~name:"build_interface"
+    ~name:"build_interface" ~limit
+    ~lifetime:(`KeepFor Maki.Time.(minutes 30))
     ~deps:[V.pack_file file_mli; V.pack_set V.string deps]
     ~op:V.file
     (fun () ->
        shellf "@[<h>ocamlfind ocamlc -c -I %s %a %s -o %s@]"
          path pp_strings_space (deps_to_args deps) file_mli file_cmi
        >>= fun (o,e,_) ->
-       if CCIO.File.exists file_cmi
+       if Sys.file_exists file_cmi
        then Lwt.return file_cmi
        else failf_lwt "failed to build interface %s of %s\n%s\n%s" file_cmi m o e)
 
 (* build module [m] (after building its dependencies).
    @param path path in which [m] lives
-   @param deps library [m] depends upon
-   @param all_modules all modules in the current compilation unit *)
-let rec build_module ~path ~deps ~all_mods m : Maki.path Lwt.t =
+   @param deps library [m] depends upon *)
+let rec build_module ~path ~deps m : Maki.path Lwt.t =
   (* compute deps *)
-  let%lwt m_deps =
-    find_deps ~deps ~path m
-    >|= List.filter (fun m' -> List.mem m' all_mods)
-  in
+  let%lwt m_deps = find_local_deps ~deps ~path m in
   (* build deps, obtain the resulting .cmo files *)
   let%lwt m_deps' =
-    Lwt_list.map_p (fun m' -> build_module ~path ~deps ~all_mods m') m_deps
+    Lwt_list.map_p (fun m' -> build_module ~path ~deps m') m_deps
   in
   (* build interface *)
   let%lwt _ = build_interface ~path ~deps m in
   let file_ml = module_to_ml ~path m in
   let file_cmo = module_to_cmo ~path m in
   Maki.call_exn
-    ~name:"build_module"
-    ~deps:[V.pack_file file_ml;
+    ~name:"build_module" ~limit
+    ~lifetime:(`KeepFor Maki.Time.(hours 2))
+    ~deps:[V.pack_program "ocamlc"; V.pack_file file_ml;
            V.pack_set V.string deps; V.pack_set V.file m_deps']
     ~op:V.file
     (fun () ->
@@ -144,7 +172,7 @@ let rec build_module ~path ~deps ~all_mods m : Maki.path Lwt.t =
          pp_strings_space m_deps'
          file_ml file_cmo
        >>= fun (o,e,_) ->
-       if CCIO.File.exists file_cmo
+       if Sys.file_exists file_cmo
        then Lwt.return file_cmo
        else failf_lwt "failed to build %s for %s:\n%s\n%s" file_cmo m o e)
 
@@ -152,7 +180,7 @@ let build_lib ~deps ~path ~name modules =
   (* build modules *)
   let%lwt () =
     Lwt_list.iter_p
-      (fun m -> build_module ~deps ~path ~all_mods:modules m >|= fun _ -> ())
+      (fun m -> build_module ~deps ~path m >|= fun _ -> ())
       modules
   in
   (* link in the proper order *)
@@ -162,14 +190,15 @@ let build_lib ~deps ~path ~name modules =
   in
   let file_out = Filename.concat path (name ^ ".cma") in
   Maki.call_exn
-    ~name:"build_lib"
-    ~deps:[V.pack_list V.file l; V.pack_set V.string deps]
+    ~name:"build_lib" ~limit
+    ~lifetime:(`KeepFor Maki.Time.(hours 2))
+    ~deps:[V.pack_program "ocamlc"; V.pack_list V.file l; V.pack_set V.string deps]
     ~op:V.file
     (fun () ->
        shellf "@[<h>ocamlfind ocamlc -a %a -o %s"
          pp_strings_space l file_out
        >>= fun (o,e,_) ->
-       if CCIO.File.exists file_out then Lwt.return file_out
+       if Sys.file_exists file_out then Lwt.return file_out
        else failf_lwt "error while building `%s` (out: %s, err:%s)" name o e
     )
   >|= fun _ -> ()
@@ -178,19 +207,16 @@ let build_exec ~deps ~path ~name:_ main_is : unit Lwt.t =
   (* get back to module name (so as to reuse find_deps) *)
   let main_m = Filename.chop_extension main_is |> String.capitalize in
   Maki_log.logf 5 (fun k->k "main module: %s (main_is: %s)" main_m main_is);
-  (* find dependencies; only keep  those in the same path *)
-  let%lwt m_deps =
-    find_deps ~deps ~path main_m
-    >|= List.filter
-      (fun m -> try ignore (module_to_ml ~path m); true with _ -> false)
-  in
+  (* find recursive dependencies; only keep  those in the same path *)
+  let%lwt m_deps = find_local_deps_rec ~deps ~path main_m in
+  Maki_log.logf 5 (fun k->k "main %s depends recursively on %a" main_m pp_strings m_deps);
   (* build deps *)
   let%lwt m_deps' =
-    Lwt_list.map_p (build_module ~path ~deps ~all_mods:deps) m_deps
+    Lwt_list.map_p (build_module ~path ~deps) m_deps
   in
   (* build main module *)
   let%lwt main' =
-    build_module ~path ~deps ~all_mods:deps main_m
+    build_module ~path ~deps main_m
   in
   (* sort dependencies topologically *)
   let%lwt l =
@@ -199,20 +225,21 @@ let build_exec ~deps ~path ~name:_ main_is : unit Lwt.t =
   in
   (* also depend on main module *)
   let l = l @ [main'] in
-  let file_in = module_to_cmo ~path main_m in
+  let file_in = main' in
   let file_out = Filename.concat path (set_ext ~ext:".byte" main_is) in
   Maki.call_exn
-    ~name:"build_exec"
-    ~deps:[V.pack_file file_in;
+    ~name:"build_exec" ~limit
+    ~lifetime:(`KeepFor Maki.Time.(hours 2))
+    ~deps:[V.pack_program "ocamlc"; V.pack_file file_in;
            V.pack_set V.string m_deps'; V.pack_set V.file l]
     ~op:V.file
     (fun () ->
-       shellf "@[<h>ocamlfind ocamlc %a %a %s -o %s@]"
+       shellf "@[<h>ocamlfind ocamlc %a %a -linkpkg %s -o %s@]"
          pp_strings_space (deps_to_args deps)
          pp_strings_space l
          file_in file_out
        >>= fun (o,e,_) ->
-       if CCIO.File.exists file_out
+       if Sys.file_exists file_out
        then Lwt.return file_out
        else failf_lwt "failed to build binary `%s` for `%s`\n%s\n%s"
            file_out main_is o e
