@@ -33,6 +33,8 @@ Library "maki_yojson"
   Modules:      Maki_yojson
   FindlibName:  yojson
   FindlibParent:maki
+  Build$:       flag(yojson)
+  Install$:     flag(yojson)
   BuildDepends: maki, yojson
 
 Executable maki_gc
@@ -70,9 +72,20 @@ Document maki
   Type:                 ocamlbuild (0.3)
   BuildTools+:          ocamldoc
   Build$:               flag(docs)
-  Install:              true
+  Install$:             flag(docs)
   XOCamlbuildPath:      .
   XOCamlbuildExtraArgs:
     "-docflags '-colorize-code -short-functors -charset utf-8'"
-  XOCamlbuildLibraries: maki, maki.yojson
+  XOCamlbuildLibraries: maki
+
+Document maki
+  Title:                Maki_yojson docs
+  Type:                 ocamlbuild (0.3)
+  BuildTools+:          ocamldoc
+  Build$:               flag(docs) && flag(yojson)
+  Install$:             flag(docs) && flag(yojson)
+  XOCamlbuildPath:      .
+  XOCamlbuildExtraArgs:
+    "-docflags '-colorize-code -short-functors -charset utf-8'"
+  XOCamlbuildLibraries: maki.yojson
 

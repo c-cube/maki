@@ -1,10 +1,9 @@
 # OASIS_START
-# DO NOT EDIT (digest: 4beb6483d54da4c614a52540e94bd8f7)
+# DO NOT EDIT (digest: 9b94af048e4d1a33e053ab997cf32a1e)
 src/core/Maki
 src/core/Maki_storage
 src/core/Maki_lwt_err
 src/core/Maki_log
 src/core/Maki_bencode
 src/core/Maki_utils
-src/json/Maki_yojson
 # OASIS_STOP

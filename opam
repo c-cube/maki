@@ -35,6 +35,6 @@ depopts: [
 tags: [ "incremental" "persistent" "memoization" ]
 homepage: "https://github.com/c-cube/maki/"
 doc: "http://cedeela.fr/~simon/software/maki/"
-available: [ocaml-version >= "4.00.0"]
+available: [ocaml-version >= "4.02.0"]
 dev-repo: "https://github.com/c-cube/maki.git"
 bug-reports: "https://github.com/c-cube/maki/issues/"
