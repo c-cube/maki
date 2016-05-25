@@ -15,15 +15,15 @@
 <link title="Maki_yojson" rel="Chapter" href="Maki_yojson.html"><title>Maki_yojson</title>
 </head>
 <body>
-<code class="code"><span class="keyword">sig</span>
-&nbsp;&nbsp;<span class="keyword">type</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;or_error&nbsp;=&nbsp;(<span class="keywordsign">'</span>a,&nbsp;exn)&nbsp;<span class="constructor">Result</span>.result
-&nbsp;&nbsp;<span class="keyword">type</span>&nbsp;json&nbsp;=&nbsp;<span class="constructor">Yojson</span>.<span class="constructor">Safe</span>.json
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:
-&nbsp;&nbsp;&nbsp;&nbsp;to_yojson:(<span class="keywordsign">'</span>a&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Maki_yojson</span>.json)&nbsp;<span class="keywordsign">-&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;of_yojson:(<span class="constructor">Maki_yojson</span>.json&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">Maki_yojson</span>.or_error)&nbsp;<span class="keywordsign">-&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">Maki</span>.<span class="constructor">Value</span>.ops
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_err&nbsp;:
-&nbsp;&nbsp;&nbsp;&nbsp;to_yojson:(<span class="keywordsign">'</span>a&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Maki_yojson</span>.json)&nbsp;<span class="keywordsign">-&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;of_yojson:(<span class="constructor">Maki_yojson</span>.json&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;[&nbsp;<span class="keywordsign">`</span><span class="constructor">Error</span>&nbsp;<span class="keyword">of</span>&nbsp;string&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="keywordsign">`</span><span class="constructor">Ok</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;])&nbsp;<span class="keywordsign">-&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">Maki</span>.<span class="constructor">Value</span>.ops
+<code class="code"><span class="keyword">sig</span><br>
+&nbsp;&nbsp;<span class="keyword">type</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;or_error&nbsp;=&nbsp;(<span class="keywordsign">'</span>a,&nbsp;exn)&nbsp;<span class="constructor">Result</span>.result<br>
+&nbsp;&nbsp;<span class="keyword">type</span>&nbsp;json&nbsp;=&nbsp;<span class="constructor">Yojson</span>.<span class="constructor">Safe</span>.json<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;to_yojson:(<span class="keywordsign">'</span>a&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Maki_yojson</span>.json)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;of_yojson:(<span class="constructor">Maki_yojson</span>.json&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">Maki_yojson</span>.or_error)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">Maki</span>.<span class="constructor">Value</span>.ops<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_err&nbsp;:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;to_yojson:(<span class="keywordsign">'</span>a&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Maki_yojson</span>.json)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;of_yojson:(<span class="constructor">Maki_yojson</span>.json&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;[&nbsp;<span class="keywordsign">`</span><span class="constructor">Error</span>&nbsp;<span class="keyword">of</span>&nbsp;string&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="keywordsign">`</span><span class="constructor">Ok</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;])&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">Maki</span>.<span class="constructor">Value</span>.ops<br>
 <span class="keyword">end</span></code></body></html>
