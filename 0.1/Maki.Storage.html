@@ -1,0 +1,128 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="previous" href="Maki.Value.html">
+<link rel="next" href="Maki.Time.html">
+<link rel="Up" href="Maki.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Maki" rel="Chapter" href="Maki.html">
+<link title="Maki_storage" rel="Chapter" href="Maki_storage.html">
+<link title="Maki_lwt_err" rel="Chapter" href="Maki_lwt_err.html">
+<link title="Maki_log" rel="Chapter" href="Maki_log.html">
+<link title="Maki_bencode" rel="Chapter" href="Maki_bencode.html">
+<link title="Maki_utils" rel="Chapter" href="Maki_utils.html">
+<link title="Maki_yojson" rel="Chapter" href="Maki_yojson.html"><title>Maki.Storage</title>
+</head>
+<body>
+<div class="navbar"><a class="pre" href="Maki.Value.html" title="Maki.Value">Previous</a>
+&nbsp;<a class="up" href="Maki.html" title="Maki">Up</a>
+&nbsp;<a class="post" href="Maki.Time.html" title="Maki.Time">Next</a>
+</div>
+<h1>Module <a href="type_Maki.Storage.html">Maki.Storage</a></h1>
+
+<pre><span class="keyword">module</span> Storage: <code class="type"><a href="Maki_storage.html">Maki_storage</a></code></pre><hr width="100%">
+
+<pre><span id="TYPEor_error"><span class="keyword">type</span> <code class="type">'a</code> or_error</span> = <code class="type">('a, exn) Result.result</code> </pre>
+
+
+<pre><span id="TYPEpath"><span class="keyword">type</span> <code class="type"></code>path</span> = <code class="type">string</code> </pre>
+
+
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTt.name">name</span>&nbsp;: <code class="type">string</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTt.get">get</span>&nbsp;: <code class="type">string -> string option <a href="Maki_storage.html#TYPEor_error">or_error</a> Lwt.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTt.set">set</span>&nbsp;: <code class="type">string -> string -> unit <a href="Maki_storage.html#TYPEor_error">or_error</a> Lwt.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTt.remove">remove</span>&nbsp;: <code class="type">string -> unit Lwt.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTt.fold">fold</span>&nbsp;: <code class="type">'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTt.flush_cache">flush_cache</span>&nbsp;: <code class="type">unit -> unit</code>;</code></td>
+
+</tr></table>
+}
+
+
+
+<pre><span id="VALname"><span class="keyword">val</span> name</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string</code></pre><div class="info ">
+Informal description of the storage<br>
+</div>
+
+<pre><span id="VALget"><span class="keyword">val</span> get</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string -> string option <a href="Maki_storage.html#TYPEor_error">or_error</a> Lwt.t</code></pre><div class="info ">
+<code class="code">get t k</code> obtains the value for <code class="code">k</code> in <code class="code">t</code><br>
+</div>
+
+<pre><span id="VALget_exn"><span class="keyword">val</span> get_exn</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string -> string option Lwt.t</code></pre>
+<pre><span id="VALfind"><span class="keyword">val</span> find</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string -> string Lwt.t</code></pre><div class="info ">
+<b>Raises</b> <code>Not_found</code> if key could not be found<br>
+</div>
+
+<pre><span id="VALset"><span class="keyword">val</span> set</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string -> string -> unit <a href="Maki_storage.html#TYPEor_error">or_error</a> Lwt.t</code></pre><div class="info ">
+<code class="code">set t k v</code> puts the pair <code class="code">k <span class="keywordsign">-&gt;</span> v</code> in <code class="code">t</code><br>
+</div>
+
+<pre><span id="VALset_exn"><span class="keyword">val</span> set_exn</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string -> string -> unit Lwt.t</code></pre>
+<pre><span id="VALremove"><span class="keyword">val</span> remove</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> string -> unit Lwt.t</code></pre>
+<pre><span id="VALfold"><span class="keyword">val</span> fold</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t</code></pre><div class="info ">
+<code class="code">fold ~f ~x t</code> folds over all the pairs <code class="code">key, value</code> in <code class="code">t</code>.<br>
+</div>
+
+<pre><span id="VALflush_cache"><span class="keyword">val</span> flush_cache</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> unit</code></pre><div class="info ">
+Flush in-process cache, if any<br>
+</div>
+
+<pre><span id="VALnone"><span class="keyword">val</span> none</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a></code></pre><div class="info ">
+A dummy storage which does not store any result, thus forcing
+    every computation to run.<br>
+</div>
+
+<pre><span id="VALdefault"><span class="keyword">val</span> default</span> : <code class="type">?dir:<a href="Maki_storage.html#TYPEpath">path</a> -> unit -> <a href="Maki_storage.html#TYPEt">t</a> Lwt.t</code></pre><div class="info ">
+<code class="code">default ?dir ()</code> creates a new default storage (one file per pair)<br>
+<b>Raises</b> <code>Unix.Error</code> in case of error, if it could not create <code class="code">dir</code> properly<br>
+</div>
+<div class="param_info"><code class="code">dir</code> : if provided, set the directory used for storing files
+      if <code class="code">dir</code> is not set, then the current directory is used, unless the
+        environment variable "MAKI_DIR" is set</div>
+
+<pre><span id="VALset_default"><span class="keyword">val</span> set_default</span> : <code class="type"><a href="Maki_storage.html#TYPEt">t</a> -> unit</code></pre><div class="info ">
+Change the storage that is used to evaluate every Maki function<br>
+</div>
+
+<pre><span id="VALget_default"><span class="keyword">val</span> get_default</span> : <code class="type">unit -> <a href="Maki_storage.html#TYPEt">t</a></code></pre></body></html>

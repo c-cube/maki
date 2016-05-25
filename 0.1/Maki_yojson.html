@@ -1,0 +1,42 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="previous" href="Maki_utils.html">
+<link rel="Up" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Maki" rel="Chapter" href="Maki.html">
+<link title="Maki_storage" rel="Chapter" href="Maki_storage.html">
+<link title="Maki_lwt_err" rel="Chapter" href="Maki_lwt_err.html">
+<link title="Maki_log" rel="Chapter" href="Maki_log.html">
+<link title="Maki_bencode" rel="Chapter" href="Maki_bencode.html">
+<link title="Maki_utils" rel="Chapter" href="Maki_utils.html">
+<link title="Maki_yojson" rel="Chapter" href="Maki_yojson.html"><title>Maki_yojson</title>
+</head>
+<body>
+<div class="navbar"><a class="pre" href="Maki_utils.html" title="Maki_utils">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;</div>
+<h1>Module <a href="type_Maki_yojson.html">Maki_yojson</a></h1>
+
+<pre><span class="keyword">module</span> Maki_yojson: <code class="code"><span class="keyword">sig</span></code> <a href="Maki_yojson.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
+<h1 id="1_SimplewrapperforYojson">Simple wrapper for Yojson</h1><br>
+</div>
+<hr width="100%">
+
+<pre><span id="TYPEor_error"><span class="keyword">type</span> <code class="type">'a</code> or_error</span> = <code class="type">('a, exn) Result.result</code> </pre>
+
+
+<pre><span id="TYPEjson"><span class="keyword">type</span> <code class="type"></code>json</span> = <code class="type">Yojson.Safe.json</code> </pre>
+<div class="info ">
+Yojson.Safe<br>
+</div>
+
+
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">to_yojson:('a -> <a href="Maki_yojson.html#TYPEjson">json</a>) -><br>       of_yojson:(<a href="Maki_yojson.html#TYPEjson">json</a> -> 'a <a href="Maki_yojson.html#TYPEor_error">or_error</a>) -><br>       string -> 'a <a href="Maki.Value.html#TYPEops">Maki.Value.ops</a></code></pre>
+<pre><span id="VALmake_err"><span class="keyword">val</span> make_err</span> : <code class="type">to_yojson:('a -> <a href="Maki_yojson.html#TYPEjson">json</a>) -><br>       of_yojson:(<a href="Maki_yojson.html#TYPEjson">json</a> -> [ `Error of string | `Ok of 'a ]) -><br>       string -> 'a <a href="Maki.Value.html#TYPEops">Maki.Value.ops</a></code></pre></body></html>

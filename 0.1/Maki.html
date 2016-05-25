@@ -1,0 +1,221 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="next" href="Maki_storage.html">
+<link rel="Up" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Maki" rel="Chapter" href="Maki.html">
+<link title="Maki_storage" rel="Chapter" href="Maki_storage.html">
+<link title="Maki_lwt_err" rel="Chapter" href="Maki_lwt_err.html">
+<link title="Maki_log" rel="Chapter" href="Maki_log.html">
+<link title="Maki_bencode" rel="Chapter" href="Maki_bencode.html">
+<link title="Maki_utils" rel="Chapter" href="Maki_utils.html">
+<link title="Maki_yojson" rel="Chapter" href="Maki_yojson.html"><link title="Basic types" rel="Section" href="#2_Basictypes">
+<link title="Controlling Parallelism" rel="Section" href="#2_ControllingParallelism">
+<link title="Values" rel="Section" href="#2_Values">
+<link title="On-Disk storage" rel="Section" href="#2_OnDiskstorage">
+<link title="Time Utils" rel="Section" href="#2_TimeUtils">
+<link title="Memoized Functions" rel="Section" href="#2_MemoizedFunctions">
+<link title="On-Storage Values" rel="Section" href="#2_OnStorageValues">
+<link title="GC" rel="Section" href="#2_GC">
+<link title="Utils" rel="Section" href="#2_Utils">
+<title>Maki</title>
+</head>
+<body>
+<div class="navbar">&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Maki_storage.html" title="Maki_storage">Next</a>
+</div>
+<h1>Module <a href="type_Maki.html">Maki</a></h1>
+
+<pre><span class="keyword">module</span> Maki: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
+<h1 id="1_MakiPersistentIncrementalComputations">Maki: Persistent Incremental Computations</h1>
+<p>
+
+    Maki is a system for memoizing costly OCaml functions using the disk.
+    It requires the functions to be <b>pure</b>, that is, to always return
+    the same result given that the set of <b>dependencies</b> declared by
+    the function doesn't change.
+<p>
+
+    <b>status: experimental</b>
+<p>
+
+    This module is not thread-safe.<br>
+</div>
+<hr width="100%">
+
+<pre><span id="TYPEor_error"><span class="keyword">type</span> <code class="type">'a</code> or_error</span> = <code class="type">('a, exn) Result.result</code> </pre>
+
+
+<pre><span id="TYPElwt_or_error"><span class="keyword">type</span> <code class="type">'a</code> lwt_or_error</span> = <code class="type">'a <a href="Maki.html#TYPEor_error">or_error</a> Lwt.t</code> </pre>
+
+<br>
+<h2 id="2_Basictypes">Basic types</h2><br>
+
+<pre><span id="TYPEpath"><span class="keyword">type</span> <code class="type"></code>path</span> = <code class="type">string</code> </pre>
+
+
+<pre><span id="TYPEprogram"><span class="keyword">type</span> <code class="type"></code>program</span> = <code class="type">string</code> </pre>
+
+
+<pre><span id="TYPEtime"><span class="keyword">type</span> <code class="type"></code>time</span> = <code class="type">float</code> </pre>
+
+<br>
+<h2 id="2_ControllingParallelism">Controlling Parallelism</h2><br>
+
+<pre><span class="keyword">module</span> <a href="Maki.Limit.html">Limit</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Limit.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<h2 id="2_Values">Values</h2>
+<p>
+
+    Maki deals with functions that take and return values of any
+    type that provides a <code class="code"><span class="keywordsign">'</span>a <span class="constructor">Value</span>.t</code> implementation;
+    that is, values that we can serialize, unserialize, and hash.
+    The reason is that values are stored on disk for memoization purposes.<br>
+
+<pre><span class="keyword">module</span> <a href="Maki.Value.html">Value</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Value.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<h2 id="2_OnDiskstorage">On-Disk storage</h2>
+<p>
+
+    We use a generic interface for on-disk storage, in the form of a
+    dictionary <code class="code">string <span class="keywordsign">-&gt;</span> string</code>. The default storage just uses
+    one file per pair.<br>
+
+<pre><span class="keyword">module</span> <a href="Maki.Storage.html">Storage</a>: <code class="type"><a href="Maki_storage.html">Maki_storage</a></code></pre><br>
+<h2 id="2_TimeUtils">Time Utils</h2><br>
+
+<pre><span class="keyword">module</span> <a href="Maki.Time.html">Time</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Maki.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<h2 id="2_MemoizedFunctions">Memoized Functions</h2>
+<p>
+
+    This is the heart of the library: a wrapper around <b>pure</b> functions
+    from <a href="Maki.Value.html"><code class="code"><span class="constructor">Maki</span>.<span class="constructor">Value</span></code></a> arguments to a <a href="Maki.Value.html"><code class="code"><span class="constructor">Maki</span>.<span class="constructor">Value</span></code></a>-aware type. Such functions
+    are supposed to always return the same value given the same arguments
+    and dependencies (a typical dependency is an external program that
+    might have several version).
+<p>
+
+    The <a href="Maki.html#VALcall"><code class="code"><span class="constructor">Maki</span>.call</code></a> function is used to actually evaluate a wrapped function,
+    or return its memoized result if the computation was done already.
+<p>
+
+    We need to name functions because, from one execution to another,
+    the results of a function call must be stored on disk. Names are used
+    to map function calls to their result. If two different functions
+    share the same name (even across programs), the results will be
+    unpredictable.<br>
+
+<pre><span id="TYPElifetime"><span class="keyword">type</span> <code class="type"></code>lifetime</span> = <code class="type">[ `CanDrop | `Keep | `KeepFor of <a href="Maki.html#TYPEtime">time</a> | `KeepUntil of <a href="Maki.html#TYPEtime">time</a> ]</code> </pre>
+<div class="info ">
+lifetime for a cached value<br>
+</div>
+
+
+<pre><span id="VALcall"><span class="keyword">val</span> call</span> : <code class="type">?bypass:bool -><br>       ?storage:Storage.t -><br>       ?lifetime:<a href="Maki.html#TYPElifetime">lifetime</a> -><br>       ?limit:<a href="Maki.Limit.html#TYPEt">Limit.t</a> -><br>       ?tags:string list -><br>       name:string -><br>       deps:<a href="Maki.Value.html#TYPEt">Value.t</a> list -><br>       op:'res <a href="Maki.Value.html#TYPEops">Value.ops</a> -> (unit -> 'res Lwt.t) -> 'res <a href="Maki.html#TYPEor_error">or_error</a> Lwt.t</code></pre><div class="info ">
+Call the function iff its result has not been cached yet<br>
+</div>
+<div class="param_info"><code class="code">bypass</code> : if true, then cache is disabled</div>
+<div class="param_info"><code class="code">storage</code> : the storage used for caching values
+      (default <code class="code"><span class="constructor">Storage</span>.get_default ()</code>)</div>
+<div class="param_info"><code class="code">lifetime</code> : how long to keep the cached value (defautl: CanDrop)</div>
+<div class="param_info"><code class="code">limit</code> : if given, <code class="code">call</code> will acquire a handle from <code class="code">limit</code> before
+      calling the (potentially costly) function</div>
+<div class="param_info"><code class="code">name</code> : the name of the function, should be unique!</div>
+<div class="param_info"><code class="code">deps</code> : dependencies of the computation; if they change, the function
+      will have to be re-computed. In other words, the function is supposed
+      to be pure on the list of dependencies (same dependencies =&gt; same result)</div>
+
+<pre><span id="VALcall_exn"><span class="keyword">val</span> call_exn</span> : <code class="type">?bypass:bool -><br>       ?storage:Storage.t -><br>       ?lifetime:<a href="Maki.html#TYPElifetime">lifetime</a> -><br>       ?limit:<a href="Maki.Limit.html#TYPEt">Limit.t</a> -><br>       ?tags:string list -><br>       name:string -><br>       deps:<a href="Maki.Value.html#TYPEt">Value.t</a> list -><br>       op:'res <a href="Maki.Value.html#TYPEops">Value.ops</a> -> (unit -> 'res Lwt.t) -> 'res Lwt.t</code></pre><div class="info ">
+Same as <a href="Maki.html#VALcall"><code class="code"><span class="constructor">Maki</span>.call</code></a> but raises the exception instead of wrapping it in Error<br>
+</div>
+<br>
+<h2 id="2_OnStorageValues">On-Storage Values</h2><br>
+
+<pre><span id="TYPEcache_value"><span class="keyword">type</span> <code class="type"></code>cache_value</span> </pre>
+
+
+<pre><span id="VALcache_value_of_bencode"><span class="keyword">val</span> cache_value_of_bencode</span> : <code class="type">Bencode.t -> <a href="Maki.html#TYPEcache_value">cache_value</a> <a href="Maki.html#TYPEor_error">or_error</a></code></pre>
+<pre><span id="VALbencode_of_cache_value"><span class="keyword">val</span> bencode_of_cache_value</span> : <code class="type"><a href="Maki.html#TYPEcache_value">cache_value</a> -> Bencode.t</code></pre>
+<pre><span id="VALcache_value_lifetime"><span class="keyword">val</span> cache_value_lifetime</span> : <code class="type"><a href="Maki.html#TYPEcache_value">cache_value</a> -> <a href="Maki.html#TYPElifetime">lifetime</a></code></pre>
+<pre><span id="VALcache_value_fun_name"><span class="keyword">val</span> cache_value_fun_name</span> : <code class="type"><a href="Maki.html#TYPEcache_value">cache_value</a> -> string</code></pre><div class="info ">
+function used to compute<br>
+</div>
+
+<pre><span id="VALcache_value_deps"><span class="keyword">val</span> cache_value_deps</span> : <code class="type"><a href="Maki.html#TYPEcache_value">cache_value</a> -> string list</code></pre><div class="info ">
+dependencies<br>
+</div>
+
+<pre><span id="VALcache_value_data"><span class="keyword">val</span> cache_value_data</span> : <code class="type"><a href="Maki.html#TYPEcache_value">cache_value</a> -> string</code></pre><div class="info ">
+the value itself<br>
+</div>
+
+<pre><span id="VALcache_value_tags"><span class="keyword">val</span> cache_value_tags</span> : <code class="type"><a href="Maki.html#TYPEcache_value">cache_value</a> -> string list</code></pre><div class="info ">
+tags attached to this value<br>
+</div>
+<br>
+<h2 id="2_GC">GC</h2>
+<p>
+
+    Garbage Collection for the stored values. It needs to be called
+    explicitely<br>
+
+<pre><code><span id="TYPEgc_stats"><span class="keyword">type</span> <code class="type"></code>gc_stats</span> = {</code></pre><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTgc_stats.gc_kept">gc_kept</span>&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTgc_stats.gc_removed">gc_removed</span>&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr></table>
+}
+
+
+
+<pre><span id="VALstring_of_gc_stats"><span class="keyword">val</span> string_of_gc_stats</span> : <code class="type"><a href="Maki.html#TYPEgc_stats">gc_stats</a> -> string</code></pre>
+<pre><span id="VALgc_storage"><span class="keyword">val</span> gc_storage</span> : <code class="type">?remove_file:bool -> Storage.t -> <a href="Maki.html#TYPEgc_stats">gc_stats</a> <a href="Maki.html#TYPEor_error">or_error</a> Lwt.t</code></pre><div class="info ">
+<code class="code">gc_storage s</code> removes uneeded values and uneeded dependencies,
+    and returns some statistics. It might take a long time.<br>
+</div>
+<div class="param_info"><code class="code">remove_file</code> : if true, when a path result is removed, the
+      file it corresponds to is also deleted from the file system</div>
+<br>
+<h2 id="2_Utils">Utils</h2><br>
+
+<pre><span id="VALlast_mtime"><span class="keyword">val</span> last_mtime</span> : <code class="type"><a href="Maki.html#TYPEpath">path</a> -> <a href="Maki.html#TYPEtime">time</a> <a href="Maki.html#TYPEor_error">or_error</a></code></pre><div class="info ">
+Last modification time of the file<br>
+</div>
+
+<pre><span id="VALsha1"><span class="keyword">val</span> sha1</span> : <code class="type"><a href="Maki.html#TYPEpath">path</a> -> Sha1.t Lwt.t</code></pre><div class="info ">
+<code class="code">sha1 f</code> hashes the file <code class="code">f</code><br>
+</div>
+
+<pre><span id="VALsha1_of_string"><span class="keyword">val</span> sha1_of_string</span> : <code class="type">string -> Sha1.t</code></pre><div class="info ">
+hash the given string<br>
+</div>
+
+<pre><span id="VALabspath"><span class="keyword">val</span> abspath</span> : <code class="type"><a href="Maki.html#TYPEpath">path</a> -> <a href="Maki.html#TYPEpath">path</a></code></pre><div class="info ">
+Make the path absolute<br>
+</div>
+
+<pre><span id="VALshell"><span class="keyword">val</span> shell</span> : <code class="type">?timeout:float -> ?stdin:string -> string -> (string * string * int) Lwt.t</code></pre><div class="info ">
+<code class="code">shell cmd</code> runs the command <code class="code">cmd</code> and
+    returns <code class="code">stdout, sterr, errcode</code>.<br>
+</div>
+<div class="param_info"><code class="code">stdin</code> : optional input to the sub-process</div>
+
+<pre><span id="VALshellf"><span class="keyword">val</span> shellf</span> : <code class="type">?timeout:float -><br>       ?stdin:string -><br>       ('a, Format.formatter, unit, (string * string * int) Lwt.t)<br>       Pervasives.format4 -> 'a</code></pre><div class="info ">
+Same as <a href="Maki.html#VALshell"><code class="code"><span class="constructor">Maki</span>.shell</code></a> but with a format string. Careful with escaping!<br>
+</div>
+</body></html>
