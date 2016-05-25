@@ -1,0 +1,24 @@
+# OASIS_START
+# DO NOT EDIT (digest: 914cf1e3d682e3ffd9704ba6c980b3d1)
+version = "0.1"
+description =
+"persistent incremental computations, for repeatable tests and benchmarks"
+requires = "lwt.unix lwt.preemptive sha bencode result threads"
+archive(byte) = "maki.cma"
+archive(byte, plugin) = "maki.cma"
+archive(native) = "maki.cmxa"
+archive(native, plugin) = "maki.cmxs"
+exists_if = "maki.cma"
+package "yojson" (
+ version = "0.1"
+ description =
+ "persistent incremental computations, for repeatable tests and benchmarks"
+ requires = "maki yojson"
+ archive(byte) = "maki_yojson.cma"
+ archive(byte, plugin) = "maki_yojson.cma"
+ archive(native) = "maki_yojson.cmxa"
+ archive(native, plugin) = "maki_yojson.cmxs"
+ exists_if = "maki_yojson.cma"
+)
+# OASIS_STOP
+

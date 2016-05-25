@@ -1,4 +1,98 @@
 # OASIS_START
+# DO NOT EDIT (digest: 1e87eedd16e36017e4e32eff8baab9d3)
+# Ignore VCS directories, you can use the same kind of rule outside
+# OASIS_START/STOP if you want to exclude directories that contains
+# useless stuff for the build process
+true: annot, bin_annot
+<**/.svn>: -traverse
+<**/.svn>: not_hygienic
+".bzr": -traverse
+".bzr": not_hygienic
+".hg": -traverse
+".hg": not_hygienic
+".git": -traverse
+".git": not_hygienic
+"_darcs": -traverse
+"_darcs": not_hygienic
+# Library maki
+"src/core/maki.cmxs": use_maki
+<src/core/*.ml{,i,y}>: package(bencode)
+<src/core/*.ml{,i,y}>: package(lwt.preemptive)
+<src/core/*.ml{,i,y}>: package(lwt.unix)
+<src/core/*.ml{,i,y}>: package(result)
+<src/core/*.ml{,i,y}>: package(sha)
+<src/core/*.ml{,i,y}>: package(threads)
+# Library maki_yojson
+"src/json/maki_yojson.cmxs": use_maki_yojson
+<src/json/*.ml{,i,y}>: package(bencode)
+<src/json/*.ml{,i,y}>: package(lwt.preemptive)
+<src/json/*.ml{,i,y}>: package(lwt.unix)
+<src/json/*.ml{,i,y}>: package(result)
+<src/json/*.ml{,i,y}>: package(sha)
+<src/json/*.ml{,i,y}>: package(threads)
+<src/json/*.ml{,i,y}>: package(yojson)
+<src/json/*.ml{,i,y}>: use_maki
+# Executable maki_gc
+<src/tools/maki_gc.{native,byte}>: package(bencode)
+<src/tools/maki_gc.{native,byte}>: package(lwt.preemptive)
+<src/tools/maki_gc.{native,byte}>: package(lwt.unix)
+<src/tools/maki_gc.{native,byte}>: package(result)
+<src/tools/maki_gc.{native,byte}>: package(sha)
+<src/tools/maki_gc.{native,byte}>: package(threads)
+<src/tools/maki_gc.{native,byte}>: use_maki
+# Executable maki_display
+<src/tools/maki_display.{native,byte}>: package(bencode)
+<src/tools/maki_display.{native,byte}>: package(lwt.preemptive)
+<src/tools/maki_display.{native,byte}>: package(lwt.unix)
+<src/tools/maki_display.{native,byte}>: package(result)
+<src/tools/maki_display.{native,byte}>: package(sha)
+<src/tools/maki_display.{native,byte}>: package(threads)
+<src/tools/maki_display.{native,byte}>: use_maki
+<src/tools/*.ml{,i,y}>: package(bencode)
+<src/tools/*.ml{,i,y}>: package(lwt.preemptive)
+<src/tools/*.ml{,i,y}>: package(lwt.unix)
+<src/tools/*.ml{,i,y}>: package(result)
+<src/tools/*.ml{,i,y}>: package(sha)
+<src/tools/*.ml{,i,y}>: package(threads)
+<src/tools/*.ml{,i,y}>: use_maki
+# Executable maki_build
+<src/demo_build/maki_build.{native,byte}>: package(bencode)
+<src/demo_build/maki_build.{native,byte}>: package(containers)
+<src/demo_build/maki_build.{native,byte}>: package(containers.data)
+<src/demo_build/maki_build.{native,byte}>: package(lwt.ppx)
+<src/demo_build/maki_build.{native,byte}>: package(lwt.preemptive)
+<src/demo_build/maki_build.{native,byte}>: package(lwt.unix)
+<src/demo_build/maki_build.{native,byte}>: package(oasis-parser)
+<src/demo_build/maki_build.{native,byte}>: package(result)
+<src/demo_build/maki_build.{native,byte}>: package(sha)
+<src/demo_build/maki_build.{native,byte}>: package(threads)
+<src/demo_build/maki_build.{native,byte}>: use_maki
+<src/demo_build/*.ml{,i,y}>: package(bencode)
+<src/demo_build/*.ml{,i,y}>: package(containers)
+<src/demo_build/*.ml{,i,y}>: package(containers.data)
+<src/demo_build/*.ml{,i,y}>: package(lwt.ppx)
+<src/demo_build/*.ml{,i,y}>: package(lwt.preemptive)
+<src/demo_build/*.ml{,i,y}>: package(lwt.unix)
+<src/demo_build/*.ml{,i,y}>: package(oasis-parser)
+<src/demo_build/*.ml{,i,y}>: package(result)
+<src/demo_build/*.ml{,i,y}>: package(sha)
+<src/demo_build/*.ml{,i,y}>: package(threads)
+<src/demo_build/*.ml{,i,y}>: use_maki
+# Executable test_fib
+<tests/test_fib.{native,byte}>: package(bencode)
+<tests/test_fib.{native,byte}>: package(lwt.preemptive)
+<tests/test_fib.{native,byte}>: package(lwt.unix)
+<tests/test_fib.{native,byte}>: package(result)
+<tests/test_fib.{native,byte}>: package(sha)
+<tests/test_fib.{native,byte}>: package(threads)
+<tests/test_fib.{native,byte}>: use_maki
+<tests/*.ml{,i,y}>: package(bencode)
+<tests/*.ml{,i,y}>: package(lwt.preemptive)
+<tests/*.ml{,i,y}>: package(lwt.unix)
+<tests/*.ml{,i,y}>: package(result)
+<tests/*.ml{,i,y}>: package(sha)
+<tests/*.ml{,i,y}>: package(threads)
+<tests/*.ml{,i,y}>: use_maki
 # OASIS_STOP
 
 <src/**>: warn(+a-4-44-50)
