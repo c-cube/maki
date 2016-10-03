@@ -32,12 +32,6 @@ let get_exn t k =
     | Ok x -> Lwt.return x
     | Error e -> Lwt.fail e
 
-let find t k =
-  t.get k >>= function
-    | Ok (Some x) -> Lwt.return x
-    | Ok None -> Lwt.fail Not_found
-    | Error e -> Lwt.fail e
-
 let set_exn t k v =
   t.set k v >>= function
     | Ok () -> Lwt.return_unit

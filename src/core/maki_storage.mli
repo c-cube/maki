@@ -37,9 +37,6 @@ val get : t -> string -> string option or_error Lwt.t
 
 val get_exn : t -> string -> string option Lwt.t
 
-val find : t -> string -> string Lwt.t
-(** @raise Not_found if key could not be found *)
-
 val set : t -> string -> string -> unit or_error Lwt.t
 (** [set t k v] puts the pair [k -> v] in [t] *)
 

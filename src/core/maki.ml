@@ -17,6 +17,14 @@ let (>>|=) = LwtErr.(>|=)
 type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
 
+exception Program_not_in_path of string
+
+let () = Printexc.register_printer
+    (function
+      | Program_not_in_path f ->
+        Some (Printf.sprintf "maki: program `%s` not found in path" f)
+      | _ -> None)
+
 module Res_ = struct
   let return x = Ok x
   let fail e = Error e
@@ -155,7 +163,8 @@ let find_tbl_ tbl k =
   try Some (Hashtbl.find tbl k) with Not_found -> None
 
 let compute_file_state_ f : file_state or_error =
-  if not (Sys.file_exists f) then Error Not_found
+  if not (Sys.file_exists f)
+  then Error (Failure (Printf.sprintf "file `%s` not found" f))
   else match find_tbl_ file_cache_ f with
   | Some (time, fs) ->
     (* cache hit, but is it up-to-date? *)
@@ -180,8 +189,6 @@ let compute_file_state_ f : file_state or_error =
 let path_tbl_ : (string, string or_error Lwt.t) Hashtbl.t = Hashtbl.create 24
 
 let path_pool_ = Lwt_pool.create 100 (fun _ -> Lwt.return_unit)
-
-exception Program_not_in_path of string
 
 (* turn [f], a potentially relative path to a program, into an absolute path *)
 let find_program_path_ f : string or_error Lwt.t =
