@@ -51,3 +51,10 @@ upload-doc: doc
 	  mkdir -p dev && \
 	  cp -r maki.docdir/* dev/ && \
 	  git add --all dev
+
+watch:
+	while find src/ -print0 | xargs -0 inotifywait -e delete_self -e modify ; do \
+		echo "============ at `date` ==========" ; \
+		sleep 0.2; \
+		make all; \
+	done
