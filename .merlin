@@ -13,6 +13,5 @@ PKG result
 PKG bencode
 PKG yojson
 PKG containers
-PKG oasis-parser
 PKG lwt.ppx
 FLG -w +a-4-44

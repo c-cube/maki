@@ -13,6 +13,12 @@ val make :
   of_yojson:(json -> 'a or_error) ->
   string -> 'a Maki.Value.ops
 
+val make_str :
+  to_yojson:('a -> json) ->
+  of_yojson:(json -> ('a, string) Result.result) ->
+  string -> 'a Maki.Value.ops
+(** @since NEXT_RELEASE *)
+
 val make_err :
   to_yojson:('a -> json) ->
   of_yojson:(json -> [`Ok of 'a | `Error of string]) ->

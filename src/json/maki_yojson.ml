@@ -22,6 +22,13 @@ let make ~to_yojson ~of_yojson name =
       (try Result.Ok (Yojson.Safe.from_string s) with e -> Result.Error e)
       >>= of_yojson)
 
+let make_str ~to_yojson ~of_yojson name =
+  make name ~to_yojson
+    ~of_yojson:(
+      fun j -> match of_yojson j with
+        | Result.Ok x -> Result.Ok x
+        | Result.Error e -> Result.Error (Failure e))
+
 let make_err ~to_yojson ~of_yojson name =
   make name ~to_yojson
     ~of_yojson:(

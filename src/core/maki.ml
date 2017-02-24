@@ -8,6 +8,7 @@ open Lwt.Infix
 
 module B = Bencode
 module BM = Maki_bencode
+module Ca = Maki_utils.Cache
 
 module LwtErr = Maki_lwt_err
 
@@ -16,6 +17,14 @@ let (>>|=) = LwtErr.(>|=)
 
 type 'a or_error = ('a, exn) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
+
+exception Program_not_in_path of string
+
+let () = Printexc.register_printer
+    (function
+      | Program_not_in_path f ->
+        Some (Printf.sprintf "maki: program `%s` not found in path" f)
+      | _ -> None)
 
 module Res_ = struct
   let return x = Ok x
@@ -147,16 +156,14 @@ let bencode_of_fs fs =
     ]
 
 (* cache for files: maps file name to hash + last modif *)
-type file_cache = (string, time * file_state) Hashtbl.t
+type file_cache = (string, time * file_state) Ca.t
 
-let file_cache_ : file_cache = Hashtbl.create 128
-
-let find_tbl_ tbl k =
-  try Some (Hashtbl.find tbl k) with Not_found -> None
+let file_cache_ : file_cache = Ca.replacing 512
 
 let compute_file_state_ f : file_state or_error =
-  if not (Sys.file_exists f) then Error Not_found
-  else match find_tbl_ file_cache_ f with
+  if not (Sys.file_exists f)
+  then Error (Failure (Printf.sprintf "file `%s` not found" f))
+  else match Ca.get file_cache_ f with
   | Some (time, fs) ->
     (* cache hit, but is it up-to-date? *)
     let time' = last_time_ f in
@@ -165,7 +172,7 @@ let compute_file_state_ f : file_state or_error =
       Maki_log.logf 5 (fun k->k "hash entry for `%s` invalidated: %.2f --> %.2f" f time time');
       let fs_hash = sha1 f in
       let fs = {fs with fs_hash} in
-      Hashtbl.replace file_cache_ f (time', fs);
+      Ca.set file_cache_ f (time', fs);
       Ok fs
     )
     else Ok fs
@@ -173,22 +180,20 @@ let compute_file_state_ f : file_state or_error =
     let time = last_time_ f in
     let fs_hash = sha1 f in
     let fs = { fs_path=f; fs_hash} in
-    Hashtbl.replace file_cache_ f (time, fs);
+    Ca.set file_cache_ f (time, fs);
     Ok fs
 
 (* program name -> path *)
-let path_tbl_ : (string, string or_error Lwt.t) Hashtbl.t = Hashtbl.create 24
+let path_tbl_ : (string, string or_error Lwt.t) Ca.t = Ca.replacing 64
 
 let path_pool_ = Lwt_pool.create 100 (fun _ -> Lwt.return_unit)
-
-exception Program_not_in_path of string
 
 (* turn [f], a potentially relative path to a program, into an absolute path *)
 let find_program_path_ f : string or_error Lwt.t =
   if Filename.is_relative f && Filename.is_implicit f
-  then (
-    try Hashtbl.find path_tbl_ f
-    with Not_found ->
+  then match Ca.get path_tbl_ f with
+    | Some r -> r
+    | None ->
       let fut =
         Lwt_pool.use path_pool_
           (fun _ ->
@@ -201,9 +206,8 @@ let find_program_path_ f : string or_error Lwt.t =
              else Error (Program_not_in_path f))
       in
       (* cache *)
-      Hashtbl.add path_tbl_ f fut;
+      Ca.set path_tbl_ f fut;
       fut
-  )
   else Lwt.return (Ok f)
 
 module Value = struct
