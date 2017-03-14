@@ -676,7 +676,7 @@ f
           Maki_log.logf 3
             (fun k->k "cached file for `%s` is invalid, delete it and recompute: %s"
                 computation_name (Printexc.to_string e));
-          let%lwt () = Storage.remove storage h_computation_name in
+          Storage.remove storage h_computation_name >>= fun () ->
           compute_memoized ()
         | Ok ((_,cv) as res) ->
           (* if result is a file, check that file exists, and that
