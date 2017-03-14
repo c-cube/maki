@@ -671,29 +671,35 @@ f
         cache_value_of_bencode b >>= fun cv ->
         Value.of_string op cv.cv_data >|= fun res -> res, cv
       in
-      let fut_res = Lwt.return res in
-      fut_res >>>= fun (_,cv) ->
-      (* if result is a file, check that file exists, and that
-         it's the same as expected. Otherwise recompute (calling
-         compute_memoized recursively) *)
-      is_invalid_file_ref cv.cv_data >>= fun invalid ->
-      if invalid
-      then (
-        Maki_log.logf 3
-          (fun k->k "cached file %s is invalid, recompute" cv.cv_data);
-        compute_memoized ()
-      ) else (
-        (* if new lifetime extends longer than res.cv_gc_info, refresh *)
-        begin
-          if gc_info_lt cv.cv_gc_info cv_gc_info
-          then (
-            let cv = {cv with cv_gc_info} in
-            save_cv storage cv
-          ) else Lwt.return (Ok ())
-        end
-        >>>= fun _ ->
-        fut_res
-      )
+      begin match res with
+        | Error e ->
+          Maki_log.logf 3
+            (fun k->k "cached file for `%s` is invalid, delete it and recompute: %s"
+                computation_name (Printexc.to_string e));
+          let%lwt () = Storage.remove storage h_computation_name in
+          compute_memoized ()
+        | Ok ((_,cv) as res) ->
+          (* if result is a file, check that file exists, and that
+             it's the same as expected. Otherwise recompute (calling
+             compute_memoized recursively) *)
+          is_invalid_file_ref cv.cv_data >>= fun invalid ->
+          if invalid then (
+            Maki_log.logf 3
+              (fun k->k "cached file %s is invalid, recompute" cv.cv_data);
+            compute_memoized ()
+          ) else (
+            (* if new lifetime extends longer than res.cv_gc_info, refresh *)
+            begin
+              if gc_info_lt cv.cv_gc_info cv_gc_info
+              then (
+                let cv = {cv with cv_gc_info} in
+                save_cv storage cv
+              ) else Lwt.return (Ok ())
+            end
+            >>|= fun _ ->
+            res
+          )
+      end
   in
   (* check memo table *)
   try
