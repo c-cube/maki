@@ -15,11 +15,11 @@ before_install:
   - export OPAMYES=1
   - export OPAMVERBOSE=1
   - opam init
-  - opam switch ${OCAML_VERSION}
+  - opam switch -q ${OCAML_VERSION}
   - eval `opam config env`
   - opam pin add -n maki ./
-  - opam install maki --deps-only
-  - opam install yojson # TODO: find a way to automtically install deptopts ?
+  - opam install maki -q --deps-only
+  - opam install yojson -q # TODO: find a way to automtically install deptopts ?
 install:
   - opam install -t maki
 script:
