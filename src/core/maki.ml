@@ -15,16 +15,11 @@ module LwtErr = Maki_lwt_err
 let (>>>=) = LwtErr.(>>=)
 let (>>|=) = LwtErr.(>|=)
 
-type 'a or_error = ('a, exn) Result.result
+type 'a or_error = ('a, string) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
 
-exception Program_not_in_path of string
-
-let () = Printexc.register_printer
-    (function
-      | Program_not_in_path f ->
-        Some (Printf.sprintf "maki: program `%s` not found in path" f)
-      | _ -> None)
+let error = Maki_utils.error
+let errorf msg = Maki_utils.errorf msg
 
 module Res_ = struct
   let return x = Ok x
@@ -36,19 +31,22 @@ module Res_ = struct
   let (>|=) r f = match r with
     | Ok x -> Ok (f x)
     | Error e -> Error e
+  let map f x = x >|= f
   let (>>=) r f = match r with
     | Ok x -> f x
     | Error e -> Error e
+
+  exception Exit_map of string
 
   let map_l f l =
     try
       let res =
         List.map
-        (fun x -> match f x with Ok y -> y | Error e -> raise e)
+        (fun x -> match f x with Ok y -> y | Error e -> raise (Exit_map e))
         l
       in
       Ok res
-    with e -> Error e
+    with Exit_map msg -> Error msg
 end
 
 (** {2 Controlling Parallelism} *)
@@ -77,6 +75,8 @@ end
 type path = string
 type program = string
 type time = float
+type hash = string
+type encoded_value = string
 
 (** {2 Utils} *)
 
@@ -103,7 +103,8 @@ let sha1_of_string s = Sha1.string s |> Sha1.to_hex
 
 let last_mtime f : time or_error =
   try Ok (last_time_ f)
-  with e -> Error e
+  with e ->
+    errorf "could not compute `last_mtime %s`: %s" f (Printexc.to_string e)
 
 let errcode_of_status_ =
   fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) -> c
@@ -140,30 +141,15 @@ type file_state = {
   fs_hash: string Lwt.t; (* SHA1 in hex form *)
 }
 
-let fs_of_bencode = function
-  | B.Dict l ->
-    let open Res_ in
-    BM.assoc "path" l >>= BM.as_str >>= fun fs_path ->
-    BM.assoc "hash" l >>= BM.as_str >>= fun fs_hash ->
-    Ok {fs_path; fs_hash=Lwt.return fs_hash}
-  | b -> BM.expected_b "file_state" b
-
-let bencode_of_fs fs =
-  fs.fs_hash >|= fun h ->
-  B.Dict
-    [ "path", B.String fs.fs_path
-    ; "hash", B.String h
-    ]
-
 (* cache for files: maps file name to hash + last modif *)
 type file_cache = (string, time * file_state) Ca.t
 
 let file_cache_ : file_cache = Ca.replacing 512
 
 let compute_file_state_ f : file_state or_error =
-  if not (Sys.file_exists f)
-  then Error (Failure (Printf.sprintf "file `%s` not found" f))
-  else match Ca.get file_cache_ f with
+  if not (Sys.file_exists f) then (
+    errorf "file `%s` not found" f
+  ) else match Ca.get file_cache_ f with
   | Some (time, fs) ->
     (* cache hit, but is it up-to-date? *)
     let time' = last_time_ f in
@@ -203,265 +189,190 @@ let find_program_path_ f : string or_error Lwt.t =
              p#status >|= errcode_of_status_ >|= fun errcode ->
              if errcode=0
              then Ok (String.trim out)
-             else Error (Program_not_in_path f))
+             else errorf "program `%s` not found in path" f)
       in
       (* cache *)
       Ca.set path_tbl_ f fut;
       fut
   else Lwt.return (Ok f)
 
-module Value = struct
-  type 'a ops = {
-    descr: string; (* description of 'a *)
-    serialize :
-      [`Fast of ('a -> Bencode.t)
-      | `Slow of ('a -> Bencode.t Lwt.t)
-      ];
-    unserialize : Bencode.t -> 'a or_error;
-  }
+(** {2 hash input values} *)
+module Hash = struct
+  type 'a t = Sha1.ctx -> 'a -> unit Lwt.t
 
-  type t = Value : 'a ops * 'a -> t
-  (** Universal type, can be hashed, serialized, etc. *)
+  let hash (h:_ t) x =
+    let buf = Sha1.init() in
+    h buf x >|= fun () ->
+    Sha1.finalize buf
 
-  let make ~serialize ~unserialize descr =
-    { descr; serialize; unserialize; }
+  let hash_to_string h x = hash h x >|= Sha1.to_hex
 
-  let make_fast ~serialize ~unserialize descr =
-    make ~serialize:(`Fast serialize) ~unserialize descr
+  let str_ ctx s = Sha1.update_string ctx s
 
-  let make_slow ~serialize ~unserialize descr =
-    make ~serialize:(`Slow serialize) ~unserialize descr
+  let unit _ _ = Lwt.return_unit
+  let int ctx x = str_ ctx (string_of_int x); Lwt.return_unit
+  let bool ctx x = str_ ctx (string_of_bool x); Lwt.return_unit
+  let float ctx x = str_ ctx (string_of_float x); Lwt.return_unit
+  let string ctx x = str_ ctx x; Lwt.return_unit
 
-  let int =
-    make_fast "int"
-      ~serialize:(fun i -> B.Integer i)
-      ~unserialize:(function
-        | B.Integer i -> Ok i
-        | B.String s ->
-          begin
-            try Ok (int_of_string s)
-            with _ -> BM.expected_s "int" s
-          end;
-        | b -> BM.expected_b "int" b)
+  let map f h ctx x = h ctx (f x)
 
-  let string =
-    make_fast "string"
-      ~serialize:(fun s -> Bencode.String s)
-      ~unserialize:(function
-          | B.String s -> Ok s
-          | b -> BM.expected_b "string" b)
+  let list h ctx l = Lwt_list.iter_s (h ctx) l
+  let array h ctx a = list h ctx (Array.to_list a)
 
-  let bool =
-    make_fast "bool"
-      ~serialize:(fun b -> if b then B.Integer 1 else B.Integer 0)
-      ~unserialize:(function
-            | B.Integer 0 -> Ok false
-            | B.Integer n when n<>0 -> Ok true
-            | B.String s ->
-              begin try Ok (bool_of_string s)
-                with _ -> BM.expected_s "bool" s
-              end
-            | b -> BM.expected_b "bool" b)
+  let file_state ctx (fs:file_state): unit Lwt.t =
+    fs.fs_hash >|= fun h ->
+    str_ ctx fs.fs_path;
+    str_ ctx h
 
-  (* TODO: use the hexadecimal output of Printf when available ? *)
-  let float =
-    make_fast "float"
-      ~serialize:(fun f -> B.String Int64.((to_string @@ bits_of_float f)))
-      ~unserialize:(function
-          | B.String s ->
-            begin try Ok Int64.(float_of_bits @@ of_string s)
-              with Failure _ -> BM.expected_s "float" s
-            end
-          | b -> BM.expected_b "float" b)
-
-  (* special behavior for files: comparison is done be by timestamp+hash *)
-  let file =
-    (* serialize:
-       look into cache for the file_state, compare timestamp,
-       and compute hash if timestamp changed or file is not in cache *)
-    make_slow "file"
-      ~serialize:(fun f ->
-        let f = abspath f in
-        match compute_file_state_ f with
-          | Error e -> Lwt.fail e
-          | Ok fs -> bencode_of_fs fs)
-      ~unserialize:(fun b ->
-          let open Res_ in
-          fs_of_bencode b >|= fun fs -> fs.fs_path)
+  (* special behavior for files (comparison is done be by timestamp+hash)
+     look into cache for the file_state, compare timestamp,
+     and compute hash if timestamp changed or file is not in cache *)
+  let file ctx f =
+    let f = abspath f in
+    begin match compute_file_state_ f with
+      | Error e ->  Lwt.fail (Failure e)
+      | Ok fs -> file_state ctx fs
+    end
 
   (* special behavior for programs: find the path to the binary,
      then behave like a file *)
-  let program =
-    make_slow "program"
-      ~serialize:(fun f ->
-          find_program_path_ f >>= function
-          | Error e -> Lwt.fail e
-          | Ok p ->
-            match compute_file_state_ p with
-              | Error e -> Lwt.fail e
-              | Ok fs -> bencode_of_fs fs)
-      ~unserialize:(fun b ->
-          let open Res_ in
-          fs_of_bencode b >|= fun fs -> fs.fs_path)
+  let program ctx f: unit Lwt.t =
+    find_program_path_ f >>= function
+    | Error e -> Lwt.fail (Failure e)
+    | Ok p ->
+      begin match compute_file_state_ p with
+        | Error e -> Lwt.fail (Failure e)
+        | Ok fs -> file_state ctx fs
+      end
+
+  let pair h1 h2 ctx (x1,x2) =
+    h1 ctx x1 >>= fun () ->
+    h2 ctx x2
+
+  let triple h1 h2 h3 ctx (x1,x2,x3) =
+    h1 ctx x1 >>= fun () ->
+    h2 ctx x2 >>= fun () ->
+    h3 ctx x3
+
+  let quad h1 h2 h3 h4 ctx (x1,x2,x3,x4) =
+    h1 ctx x1 >>= fun () ->
+    h2 ctx x2 >>= fun () ->
+    h3 ctx x3 >>= fun () ->
+    h4 ctx x4
+
+  (* set: orderless. We compute all hashes, sort, then hash the resulting list *)
+  let set h ctx l =
+    Lwt_list.map_s (fun x -> hash_to_string h x) l >|= fun l ->
+    let l = List.sort String.compare l in
+    List.iter (str_ ctx) l
+
+  let marshal: 'a t = fun ctx x ->
+    str_ ctx (Marshal.to_string x [Marshal.Closures]); Lwt.return_unit
+end
+
+(** {2 Encoder/Decoder} *)
+
+module Codec = struct
+  type hash = string
+  type encoded_value = string
+
+  type 'a t = {
+    descr: string;
+    encode: 'a -> encoded_value * hash list;
+    (** [encode x] should return a string encoding of [x], to be stored
+        for the computation of some function, as well as a list of
+        hash of sub-values used by [x] (for garbage collection purposes) *)
+    decode: encoded_value -> 'a or_error;
+    (** Decode the main value from its serialized representation *)
+  }
+
+  let make ~encode ~decode descr =
+    { descr; encode; decode; }
+
+  let encode v x = v.encode x
+  let decode v s = v.decode s
+
+  let make1 ~encode ~decode descr =
+    make ~encode:(fun x -> encode x, []) ~decode descr
+
+  let int =
+    make1 "int"
+      ~encode:string_of_int
+      ~decode:(fun s ->
+        begin
+          try Ok (int_of_string s)
+          with _ -> errorf "expected int, got `%s`" s
+        end)
+
+  let string =
+    make1 "string" ~encode:(fun s->s) ~decode:(fun s->Ok s)
+
+  let bool =
+    make1 "bool"
+      ~encode:string_of_bool
+      ~decode:(fun s ->
+        begin try Ok (bool_of_string s)
+          with _ -> errorf "expected bool, got `%s`" s
+        end)
+
+  (* TODO: use the hexadecimal output of Printf when available ? *)
+  let float =
+    make1 "float"
+      ~encode:(fun f -> Int64.((to_string @@ bits_of_float f)))
+      ~decode:(fun s ->
+        begin try Ok Int64.(float_of_bits @@ of_string s)
+          with Failure _ -> errorf "expected float, got `%s`" s
+        end)
 
   let marshal name =
     let flags = [Marshal.Closures; Marshal.No_sharing; Marshal.Compat_32] in
-    make_fast name
-      ~serialize:(fun x -> BM.mk_str (Marshal.to_string x flags))
-      ~unserialize:(function
-          | B.String s -> Marshal.from_string s 0
-          | b -> BM.expected_b "string" b)
+    make1 name
+      ~encode:(fun x -> Marshal.to_string x flags)
+      ~decode:(fun s -> Marshal.from_string s 0)
 
-  let list op =
-    let descr = Printf.sprintf "(list %s)" op.descr in
-    let serialize = match op.serialize with
-      | `Fast f -> `Fast (fun l -> B.List (List.map f l))
-      | `Slow f -> `Slow (fun l -> Lwt_list.map_p f l >|= BM.mk_list)
-    in
-    make descr
-      ~serialize
-      ~unserialize:(function
-          | B.List l -> Res_.map_l op.unserialize l
-          | b -> BM.expected_b descr b)
+  let or_error (c:'a t): 'a or_error t =
+    let name = c.descr ^ " or_error" in
+    make name
+      ~encode:(function
+        | Ok x -> let s, deps = encode c x in "1" ^ s, deps
+        | Error y -> "0" ^ y, [])
+      ~decode:(fun s ->
+        let open Res_ in
+        if s<>"" && s.[0] = '0'
+        then decode c (String.sub s 1 (String.length s-1)) >|= Res_.return
+        else if s<>"" && s.[0] = '1'
+        then String.sub s 1 (String.length s-1) |> Res_.fail
+        else errorf "expected %s, got `%s`" name s)
 
-  let set op =
-    let descr = Printf.sprintf "(set %s)" op.descr in
-    (* sort by ordering on Bencode, which is, Pervasives.compare *)
-    let mk_list_sort l =
-      List.sort Pervasives.compare l |> BM.mk_list
-    in
-    let serialize = match op.serialize with
-      | `Fast f -> `Fast (fun l -> List.map f l |> mk_list_sort)
-      | `Slow f -> `Slow (fun l -> Lwt_list.map_p f l >|= mk_list_sort)
-    in
-    make descr
-      ~serialize
-      ~unserialize:(function
-          | B.List l -> Res_.map_l op.unserialize l
-          | b -> BM.expected_b descr b)
-
-  let assoc op =
-    let descr = Printf.sprintf "(assoc %s)" op.descr in
-    let serialize = match op.serialize with
-      | `Fast f ->
-        `Fast
-          (fun l -> B.Dict (List.map (fun (name,x) -> name, f x) l))
-      | `Slow f ->
-        `Slow
-          (fun l ->
-             Lwt_list.map_p (fun (name,x) -> f x >|= fun x' -> name,x') l
-             >|= BM.mk_dict)
-    in
-    make descr
-      ~serialize
-      ~unserialize:(function
-          | B.Dict l ->
-            Res_.map_l
-              (fun (name,x) -> Res_.(op.unserialize x >|= fun x -> name, x))
-              l
-          | b -> BM.expected_b descr b)
-
-  let map ?descr f g op =
-    let descr = match descr with Some d -> d | None -> op.descr in
-    let serialize = match op.serialize with
-      | `Fast s -> `Fast (fun x -> s (f x))
-      | `Slow s -> `Slow (fun x -> s (f x))
-    in
-    { descr;
-      serialize;
-      unserialize=(fun b -> Res_.(op.unserialize b >|= g));
-    }
-
-  let serialize op x = match op.serialize with
-    | `Fast f -> Lwt.return (f x)
-    | `Slow f -> f x
-
-  let unserialize op x = op.unserialize x
-
-  let to_string op x =
-    serialize op x >|= B.encode_to_string
-
-  let of_string op s =
-    let open Res_ in
-    BM.decode_bencode s >>= unserialize op
-
-  let mk_pair a b = a,b
-  let mk_triple a b c = a,b,c
-  let mk_quad a b c d = a,b,c,d
-
-  let pair a b =
-    let descr = Printf.sprintf "(pair %s %s)" a.descr b.descr in
-    let serialize = match a.serialize, b.serialize with
-      | `Fast a, `Fast b ->
-        `Fast (fun (x,y) -> B.List [a x; b y])
-      | _ ->
-        `Slow (fun (x,y) -> serialize a x
-          >>= fun x -> serialize b y >|= BM.mk_pair x)
-    in
-    make descr
-      ~serialize
-      ~unserialize:(function
-        | B.List [x;y] ->
-            Res_.(return mk_pair <*> a.unserialize x <*> b.unserialize y)
-        | b -> BM.expected_b descr b)
-
-  let triple a b c =
-    let descr = Printf.sprintf "(triple %s %s %s)" a.descr b.descr c.descr in
-    let serialize = match a.serialize, b.serialize, c.serialize with
-      | `Fast a, `Fast b, `Fast c ->
-        `Fast (fun (x,y,z) -> B.List [a x; b y; c z])
-      | _ ->
-        `Slow (fun (x,y,z) ->
-            serialize a x >>= fun x ->
-            serialize b y >>= fun y ->
-            serialize c z >|= BM.mk_triple x y)
-    in
-    make descr
-      ~serialize
-      ~unserialize:(function
-        | B.List [x;y;z] ->
-            Res_.(return mk_triple <*> a.unserialize x
-                  <*> b.unserialize y <*> c.unserialize z)
-        | b -> BM.expected_b descr b)
-
-  let quad a b c d =
-    let descr =
-      Printf.sprintf "(quad %s %s %s %s)" a.descr b.descr c.descr d.descr in
-    let serialize = match a.serialize, b.serialize, c.serialize, d.serialize with
-      | `Fast a, `Fast b, `Fast c, `Fast d ->
-        `Fast (fun (x,y,z,u) -> B.List [a x; b y; c z; d u])
-      | _ ->
-        `Slow (fun (x,y,z,u) ->
-            serialize a x >>= fun x ->
-            serialize b y >>= fun y ->
-            serialize c z >>= fun z ->
-            serialize d u >|= BM.mk_quad x y z)
-    in
-    make descr
-      ~serialize
-      ~unserialize:(function
-        | B.List [x;y;z;u] ->
-            Res_.(return mk_quad <*> a.unserialize x
-                  <*> b.unserialize y <*> c.unserialize z <*> d.unserialize u)
-        | b -> BM.expected_b descr b)
-
-  let pack op x = Value (op,x)
-  let pack_int = pack int
-  let pack_bool = pack bool
-  let pack_string = pack string
-  let pack_file = pack file
-  let pack_program = pack program
-  let pack_list op = pack (list op)
-  let pack_set op = pack (set op)
-  let pack_assoc op = pack (assoc op)
-
-  let argv0 = pack program Sys.argv.(0)
-
-  let to_string_packed (Value (op,x)) = to_string op x
+  let to_hash (c:'a t): 'a Hash.t =
+    fun ctx x ->
+      let s, _ = encode c x in
+      Hash.string ctx s
 end
 
-(** {2 On-Disk storage} *)
-module Storage = Maki_storage
+(** {2 Arguments} *)
+module Arg = struct
+  type t = A : 'a Hash.t * 'a -> t
+
+  let make h x = A(h,x)
+
+  let int = make Hash.int
+  let unit = make Hash.unit
+  let bool= make Hash.bool
+  let string = make Hash.string
+  let float = make Hash.float
+  let list h = make (Hash.list h)
+  let array h = make (Hash.array h)
+  let file = make Hash.file
+  let program = make Hash.program
+  let set h = make (Hash.set h)
+  let marshal x = make Hash.marshal x
+
+  let pair x1 x2 = make (Hash.pair x1 x2)
+  let triple x1 x2 x3 = make (Hash.triple x1 x2 x3)
+  let quad  x1 x2 x3 x4 = make (Hash.quad x1 x2 x3 x4)
+end
 
 (** {2 Time Utils} *)
 
@@ -482,28 +393,37 @@ type gc_info =
   | KeepUntil of time
   | CanDrop
 
-(* a < b? *)
-let gc_info_lt a b = match a, b with
-  | Keep, Keep
-  | _, CanDrop -> false
-  | _, Keep
-  | CanDrop, _ -> true
-  | Keep, _ -> false
-  | KeepUntil a, KeepUntil b -> a < b
+module GC_info : sig
+  type t = gc_info
+  val lt : t -> t -> bool
+  val to_bencode : t -> Bencode.t
+  val of_bencode : Bencode.t -> t or_error
+end = struct
+  type t = gc_info
 
-let bencode_of_gc_info = function
-  | Keep -> B.String "keep"
-  | KeepUntil t -> B.List [B.String "keep_until"; B.String (string_of_float t)]
-  | CanDrop -> B.String "drop"
+  (* a < b? *)
+  let lt a b = match a, b with
+    | Keep, Keep
+    | _, CanDrop -> false
+    | _, Keep
+    | CanDrop, _ -> true
+    | Keep, _ -> false
+    | KeepUntil a, KeepUntil b -> a < b
 
-let gc_info_of_bencode = function
-  | B.String "keep" -> Ok Keep
-  | B.List [B.String "keep_until"; B.String t] ->
-    begin try Ok (KeepUntil (float_of_string t))
-      with _ -> Error (Maki_bencode.Maki_error "expected float")
-    end
-  | B.String "drop" -> Ok CanDrop
-  | _ -> Error (Maki_bencode.Maki_error "expected lifetime")
+  let to_bencode = function
+    | Keep -> B.String "keep"
+    | KeepUntil t -> B.List [B.String "keep_until"; B.String (string_of_float t)]
+    | CanDrop -> B.String "drop"
+
+  let of_bencode = function
+    | B.String "keep" -> Ok Keep
+    | B.List [B.String "keep_until"; B.String t] ->
+      begin try Ok (KeepUntil (float_of_string t))
+        with _ -> Error "expected float"
+      end
+    | B.String "drop" -> Ok CanDrop
+    | b -> errorf "expected lifetime, got `%s`" (Bencode.encode_to_string b)
+end
 
 (* lifetime for a cached value *)
 type lifetime =
@@ -512,6 +432,38 @@ type lifetime =
   | `KeepUntil of time (** Absolute deadline *)
   | `CanDrop
   ]
+
+(** {2 On-Disk storage} *)
+
+module Storage = Maki_storage
+
+(** {2 Value Stored on Disk} *)
+
+module On_disk_val = struct
+  type 'a t = 'a Codec.t * hash
+
+  let store ?(storage=Storage.get_default()) codec x =
+    let s, _ = Codec.encode codec x in
+    let k = Sha1.string s |> Sha1.to_hex in
+    Storage.set storage k s >>|= fun () ->
+    codec, k
+
+  let find ?(storage=Storage.get_default()) (codec,k) =
+    Storage.get storage k >>>= fun s ->
+    begin match s with
+      | None -> errorf "could not find value `%s` on storage" k
+      | Some s -> Codec.decode codec s
+    end |> Lwt.return
+
+  let get ?(storage=Storage.get_default()) (codec,k) =
+    Storage.get storage k >>>= fun s ->
+    begin match s with
+      | None -> Ok None
+      | Some s ->
+        let open Res_ in
+        Codec.decode codec s >|= fun x -> Some x
+    end |> Lwt.return
+end
 
 (* map computation_name -> future (serialized) result *)
 type memo_table = (string, string or_error Lwt.t) Hashtbl.t
@@ -522,78 +474,71 @@ let memo_table_ : memo_table = Hashtbl.create 64
    computation. Dependencies are listed for the GC not to collect them *)
 type cache_value = {
   cv_gc_info: gc_info; (* how long should the GC keep this value *)
-  cv_fun_name: string; (* computed from what? *)
-  cv_deps: string list; (* dependencies used to compute this value *)
-  cv_data: string; (* the actual data *)
+  cv_key: hash; (* hash of the computation *)
+  cv_children: hash list; (* hash of children *)
+  cv_data: encoded_value; (* the actual data *)
   cv_tags: string list; (* tags attached to this particular value *)
 }
 
-(* serialize [c] into Bencode *)
-let bencode_of_cache_value c =
-  B.Dict
-    [ "gc_info", bencode_of_gc_info c.cv_gc_info
-    ; "deps", BM.mk_list (List.map BM.mk_str c.cv_deps)
-    ; "data", BM.mk_str c.cv_data
-    ; "name", BM.mk_str c.cv_fun_name
-    ; "tags", BM.mk_list (List.map BM.mk_str c.cv_tags)
-    ]
+module Cache_val : sig
+  type t = cache_value
+  val codec : t Codec.t
+  val lifetime : t -> lifetime
+  val key : t -> hash
+  val data : t -> encoded_value
+  val children : t -> hash list
+  val tags : t -> string list
+end = struct
+  type t = cache_value
 
-(* [s] is a serialized cached value, turn it into a [cache_value] *)
-let cache_value_of_bencode b : cache_value or_error =
-  let open Res_ in
-  match b with
+  (* serialize [c] into Bencode *)
+  let encode c =
+    B.Dict
+      [ "gc_info", bencode_of_gc_info c.cv_gc_info;
+        "data", BM.mk_str c.cv_data;
+        "key", BM.mk_str c.cv_key;
+        "tags", BM.mk_list (List.map BM.mk_str c.cv_tags);
+      ] |> Bencode.encode_to_string
+
+  (* [s] is a serialized cached value, turn it into a [cache_value] *)
+  let decode (s:string) : cache_value or_error =
+    let open Res_ in
+    BM.decode_bencode s >>= function
     | B.Dict l ->
       BM.assoc "gc_info" l >>= gc_info_of_bencode >>= fun cv_gc_info ->
-      BM.assoc "deps" l >>= BM.as_list >>= map_l BM.as_str >>= fun cv_deps ->
       BM.assoc "data" l >>= BM.as_str >>= fun cv_data ->
-      BM.assoc "name" l >>= BM.as_str >>= fun cv_fun_name ->
-      BM.assoc_or (B.List []) "tags" l |> BM.as_list >>= map_l BM.as_str >>= fun cv_tags ->
-      return {cv_data; cv_deps; cv_gc_info; cv_fun_name; cv_tags}
-    | _ -> Error (BM.Maki_error "expected cache_value")
+      BM.assoc_or (B.List []) "children" l
+        |> BM.as_list >>= map_l BM.as_str >>= fun cv_children ->
+      BM.assoc "key" l >>= BM.as_str >>= fun cv_key ->
+      BM.assoc_or (B.List []) "tags" l
+      |> BM.as_list >>= map_l BM.as_str >>= fun cv_tags ->
+      return {cv_data; cv_gc_info; cv_key; cv_children; cv_tags}
+    | _ -> Error "expected cache_value"
 
-let cache_value_lifetime c =
-  match c.cv_gc_info with
+  let codec = Codec.make1 ~encode ~decode "cache_value"
+
+  let lifetime c = match c.cv_gc_info with
     | Keep  -> `Keep
     | KeepUntil t -> `KeepUntil t
     | CanDrop  -> `CanDrop
-let cache_value_fun_name c = c.cv_fun_name
-let cache_value_deps c = c.cv_deps
-let cache_value_data c = c.cv_data
-let cache_value_tags c = c.cv_tags
+  let key c = c.cv_key
+  let children c = c.cv_children
+  let data c = c.cv_data
+  let tags c = c.cv_tags
+end
 
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
-let compute_name fun_name l =
-  Lwt_list.map_p
-    (fun (Value.Value (op,x)) -> Value.to_string op x >|= BM.mk_str)
-    l
-  >|= fun l ->
-  let b = B.List (B.String fun_name :: l) in
-  B.encode_to_string b
-
-(* TODO: generalize this, put the operation "validate" into
-   the {!Value.ops} type *)
-(* check if [f] is a [file_state] that doesn't correspond to the actual
-   content of the disk *)
-let is_invalid_file_ref f =
-  let fs =
-    let open Res_ in
-    BM.decode_bencode f >>=
-    fs_of_bencode
-  in
-  match fs with
-  | Error _ -> Lwt.return_false (* not a file *)
-  | Ok fs ->
-    Maki_log.logf 5 (fun k->k "check if file `%s` is up-to-date..." fs.fs_path);
-    (* compare [fs] with actual current file state *)
-    match compute_file_state_ fs.fs_path with
-      | Error _ -> Lwt.return_true (* file not present, etc. *)
-      | Ok fs' ->
-        fs.fs_hash >>= fun f1 ->
-        fs'.fs_hash >|= fun f2 ->
-        let res = f1 <> f2 in
-        Maki_log.logf 5 (fun k->k "file `%s` up-to-date? %B" fs.fs_path (not res));
-        res
+let compute_name
+    (fun_name:string)
+    (args:Arg.t list): string Lwt.t =
+  let ctx = Sha1.init() in
+  Sha1.update_string ctx fun_name;
+  Lwt_list.iter_s
+    (fun (Arg.A(h,x)) -> h ctx x)
+    args
+  >|= fun () ->
+  Sha1.finalize ctx |> Sha1.to_hex
 
 (*
    - compute a string [s] out of computation and dependencies [to_string]
@@ -605,18 +550,18 @@ let is_invalid_file_ref f =
      * otherwise, compute result, write it in [h], and return it
 *)
 let call_
-?(storage=Storage.get_default ())
-?(lifetime=`CanDrop)
-?limit
-?tags:(cv_tags=[])
-~name:fun_name
-~deps
-~op
-f
+    ?(storage=Storage.get_default ())
+    ?(lifetime=`CanDrop)
+    ?limit
+    ?tags:(cv_tags=[])
+    ~name:fun_name
+    ~args
+    ~returning
+    f
   =
   (* compute the "name" of the computation *)
-  compute_name fun_name deps >>= fun computation_name ->
-  let h_computation_name = Sha1.string computation_name |> Sha1.to_hex in
+  compute_name fun_name args >>= fun computation_name ->
+  let key = Sha1.string computation_name |> Sha1.to_hex in
   let cv_gc_info = match lifetime with
     | `CanDrop -> CanDrop
     | `Keep -> Keep
@@ -627,12 +572,12 @@ f
   in
   (* save a value into the storage *)
   let save_cv storage cv =
-    let res_serialized = bencode_of_cache_value cv |> B.encode_to_string in
+    let res_serialized, _ = Codec.encode Cache_val.codec cv in
     Maki_log.logf 3
       (fun k->k "save result `%s` into storage %s (gc_info: %s)"
           computation_name (Storage.name storage)
           (bencode_of_gc_info cv.cv_gc_info |> B.encode_to_string));
-    Storage.set storage h_computation_name res_serialized
+    Storage.set storage key res_serialized
   in
   (* compute the result of calling the function, or retrieve the result in
      cache. This returns a [('a * string) or_error Lwt.t] where
@@ -642,16 +587,15 @@ f
       | None -> f ()
       | Some l -> Limit.acquire l f
     end
-    >>= fun res ->
-    Value.to_string op res >>= fun cv_data ->
-    Lwt_list.map_p Value.to_string_packed deps >>= fun cv_deps ->
-    let cv = {cv_gc_info; cv_deps; cv_data; cv_fun_name=fun_name; cv_tags} in
-    save_cv storage cv >>= fun _ ->
-    Lwt.return (Ok (res, cv))
+    >>>= fun res ->
+    let cv_data, cv_children = Codec.encode returning res in
+    let cv = {cv_gc_info; cv_data; cv_children; cv_key=key; cv_tags} in
+    save_cv storage cv >>|= fun _ ->
+    res, cv
   in
   (* check on-disk cache *)
-  let check_cache_or_compute () =
-    Storage.get storage h_computation_name >>>=
+  let check_cache_or_compute () : _ or_error Lwt.t =
+    Storage.get storage key >>>=
     function
     | None ->
       (* not in cache, perform computation (possibly acquiring
@@ -667,52 +611,41 @@ f
       (* read result from the raw data *)
       let res =
         let open Res_ in
-        BM.decode_bencode s >>= fun b ->
-        cache_value_of_bencode b >>= fun cv ->
-        Value.of_string op cv.cv_data >|= fun res -> res, cv
+        Codec.decode Cache_val.codec s >>= fun cv ->
+        Codec.decode returning cv.cv_data >|= fun res -> res, cv
       in
       begin match res with
         | Error e ->
           Maki_log.logf 3
             (fun k->k "cached file for `%s` is invalid, delete it and recompute: %s"
-                computation_name (Printexc.to_string e));
-          Storage.remove storage h_computation_name >>= fun () ->
+                computation_name e);
+          Storage.remove storage key >>= fun () ->
           compute_memoized ()
         | Ok ((_,cv) as res) ->
-          (* if result is a file, check that file exists, and that
-             it's the same as expected. Otherwise recompute (calling
-             compute_memoized recursively) *)
-          is_invalid_file_ref cv.cv_data >>= fun invalid ->
-          if invalid then (
-            Maki_log.logf 3
-              (fun k->k "cached file %s is invalid, recompute" cv.cv_data);
-            compute_memoized ()
-          ) else (
-            (* if new lifetime extends longer than res.cv_gc_info, refresh *)
-            begin
-              if gc_info_lt cv.cv_gc_info cv_gc_info
-              then (
-                let cv = {cv with cv_gc_info} in
-                save_cv storage cv
-              ) else Lwt.return (Ok ())
-            end
-            >>|= fun _ ->
-            res
-          )
+          (* if new lifetime extends longer than res.cv_gc_info, refresh *)
+          begin
+            if gc_info_lt cv.cv_gc_info cv_gc_info
+            then (
+              let cv = {cv with cv_gc_info} in
+              save_cv storage cv
+            ) else Lwt.return (Ok ())
+          end
+          >>|= fun _ ->
+          res
       end
   in
   (* check memo table *)
   try
-    let future_res = Hashtbl.find memo_table_ h_computation_name in
+    let future_res = Hashtbl.find memo_table_ key in
     (* ok, some other thread is performing the computation, just wait
        for it to complete and deserialize the result *)
     future_res >|= fun s_or_err ->
-    Res_.(s_or_err >>= Value.of_string op)
+    Res_.(s_or_err >>= Codec.decode returning)
   with Not_found ->
     let res_serialized, promise_serialized = Lwt.wait () in
     (* put future result in memo table in case another thread wants to
-       compute the same value at the same time *)
-    Hashtbl.add memo_table_ h_computation_name res_serialized;
+       compute the same value *)
+    Hashtbl.add memo_table_ key res_serialized;
     (* compute result *)
     let res = check_cache_or_compute() in
     (* ensure that when [res] terminates, [res_serialized] is updated,
@@ -720,35 +653,36 @@ f
     Lwt.on_any res
       (function
         | Ok (_,cv) ->
-          Hashtbl.remove memo_table_ h_computation_name;
+          Hashtbl.remove memo_table_ key;
           Lwt.wakeup promise_serialized (Ok cv.cv_data)
         | Error e ->
-          Hashtbl.remove memo_table_ h_computation_name;
+          Hashtbl.remove memo_table_ key;
           Lwt.wakeup promise_serialized (Error e))
       (fun e ->
-         Hashtbl.remove memo_table_ h_computation_name;
-         Lwt.wakeup promise_serialized (Error e));
+         Lwt.wakeup promise_serialized
+           (errorf "error when computing %s: %s" key (Printexc.to_string e)));
     res >>|= fst
 
 let call
-    ?(bypass=false) ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
+    ?(bypass=false) ?storage ?lifetime ?limit ?tags ~name ~args ~returning f
   =
-  if bypass
-  then
+  if bypass then (
     Lwt.catch
       (fun () ->
-         let f () = f() >|= Res_.return in
-         match limit with
+         begin match limit with
            | None -> f ()
-           | Some l -> Limit.acquire l f)
-      (fun e -> Lwt.return (Res_.fail e))
-  else call_ ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
+           | Some l -> Limit.acquire l f
+         end)
+      (fun e -> Lwt.return (error (Printexc.to_string e)))
+  ) else (
+    call_ ?storage ?lifetime ?limit ?tags ~name ~args ~returning f
+  )
 
-let call_exn ?bypass ?storage ?lifetime ?limit ?tags ~name ~deps ~op f =
-  call ?bypass ?storage ?lifetime ?limit ?tags ~name ~deps ~op f
+let call_exn ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning f =
+  call ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning f
   >>= function
   | Ok x -> Lwt.return x
-  | Error e -> Lwt.fail e
+  | Error e -> Lwt.fail (Failure e)
 
 (** {2 GC} *)
 
@@ -761,49 +695,36 @@ let string_of_gc_stats s =
   Printf.sprintf "kept %d entries, removed %d entries" s.gc_kept s.gc_removed
 
 type gc_cell = {
-  gc_deps: string list;
-  gc_path: path option; (* if file *)
+  gc_children: hash list;
   mutable gc_status: [`Root | `Alive | `Dead];
 }
 
 type gc_state = (string, gc_cell) Hashtbl.t
 
 (* find the set of roots, collect the graph in RAM *)
-let gc_collect_roots now s : gc_state Lwt.t =
+let gc_collect_roots now s : gc_state or_error Lwt.t =
   Maki_log.log 3 "gc: collecting roots...";
   let state = Hashtbl.create 256 in
   Storage.fold s ~x:()
     ~f:(fun () (key, value) ->
-        (* decide whether to add [key] to [set], so it remains alive, or now *)
-        let map_or_err =
-          let open Res_ in
-          BM.decode_bencode value >>=
-          cache_value_of_bencode >|= fun cv ->
-          (* might be a file path *)
-          let gc_path =match Value.of_string Value.file cv.cv_data with
-            | Ok f -> Some f
-            | Error _ -> None
-          in
-          (* remember dependencies of [key] *)
-          let gc_status = match cv.cv_gc_info with
-            | Keep -> `Root
-            | KeepUntil t -> if t >= now then `Root else `Dead
-            | CanDrop -> `Dead
-          in
-          Hashtbl.add state key {gc_deps=cv.cv_deps; gc_status; gc_path};
-        in
-        match map_or_err with
-          | Error e -> Lwt.fail e
-          | Ok () -> Lwt.return_unit
-     )
-  >|= fun () ->
+      (* decide whether to add [key] to [set], so it remains alive, or now *)
+      (Codec.decode Cache_val.codec value |> Lwt.return) >>|= fun cv ->
+      (* remember dependencies of [key] *)
+      let gc_status = match cv.cv_gc_info with
+        | Keep -> `Root
+        | KeepUntil t -> if t >= now then `Root else `Dead
+        | CanDrop -> `Dead
+      in
+      Hashtbl.add state key {gc_children=cv.cv_children; gc_status};
+      ())
+  >>|= fun () ->
   Maki_log.logf 3
     (fun k->k "root collection is done (%d entries)" (Hashtbl.length state));
   state
 
-let gc_storage ?(remove_file=false) s =
+let gc_storage s =
   let now = Unix.gettimeofday () in
-  gc_collect_roots now s >>= fun st ->
+  gc_collect_roots now s >>>= fun st ->
   (* actually collect dead cells *)
   let n_kept = ref 0 in
   let n_removed = ref 0 in
@@ -821,18 +742,17 @@ let gc_storage ?(remove_file=false) s =
              (fun () ->
                 Lwt.catch
                   (fun () ->
-                     (* if [c] is a file and [remove_file=true], remove it *)
-                     begin match c.gc_path with
-                       | Some f when remove_file -> Sys.remove f
-                       | _ -> ()
-                     end;
                      incr n_removed;
-                     Storage.remove s k
-                  )
-                  (fun e -> err := Some e; Lwt.return_unit)))
+                     Storage.remove s k)
+                  (fun e ->
+                     err :=
+                       Some (errorf "error when removing `%s`: %s"
+                           k (Printexc.to_string e));
+                     Lwt.return_unit)))
     st;
-  match !err with
-    | Some e -> Lwt.return (Error e)
+  begin match !err with
+    | Some e -> Lwt.return e
     | None ->
       let stats = { gc_kept= !n_kept; gc_removed= !n_removed } in
       Lwt.return (Ok stats)
+  end

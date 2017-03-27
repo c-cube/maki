@@ -8,33 +8,27 @@ module S = Maki_storage
 open Result
 open Lwt.Infix
 
-type cli_options = {
-  cli_remove_file: bool;
-}
-
 let parse_argv () =
-  let rm_file = ref false in
   let options =
     Arg.align
-    [ "--rm-files", Arg.Set rm_file, " remove files corresponding to unnedeed results"
-    ; "--debug", Arg.Int Maki_log.set_level, " set debug level"
-    ; "-d", Arg.Int Maki_log.set_level, " short for --debug"
-    ]
+      [ "--debug", Arg.Int Maki_log.set_level, " set debug level";
+        "-d", Arg.Int Maki_log.set_level, " short for --debug";
+      ]
   in
   Arg.parse options (fun _ -> ()) "usage: maki_gc [options]";
-  { cli_remove_file= !rm_file }
+  ()
 
 let () =
-  let options = parse_argv () in
+  parse_argv ();
   (* TODO: also parse which storage to GC *)
   let s = S.get_default () in
   Lwt_main.run (
-    Maki.gc_storage ~remove_file:options.cli_remove_file s
+    Maki.gc_storage s
     >>= function
     | Ok stats ->
       Printf.printf "GC done (%s)\n" (Maki.string_of_gc_stats stats);
       Lwt.return ()
     | Error e ->
-      Printf.printf "error: %s\n" (Printexc.to_string e);
+      Printf.printf "error: %s\n" e;
       exit 1
   )

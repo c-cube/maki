@@ -6,7 +6,7 @@
 open Result
 open Lwt.Infix
 
-let collect_entries s : (string * Maki.cache_value) list Lwt.t =
+let collect_entries s : (string * Maki.Cache_val.t) list Lwt.t =
   Maki_log.log 3 "display: collecting values...";
   Maki_storage.fold s ~x:[]
     ~f:(fun acc (key, value) ->

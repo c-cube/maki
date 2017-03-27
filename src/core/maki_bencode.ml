@@ -6,26 +6,19 @@
 module B = Bencode
 open Result
 
-exception Maki_error of string
-
-let () = Printexc.register_printer
-    (function
-      | Maki_error msg -> Some (Printf.sprintf "maki error: %s" msg)
-      | _ -> None)
-
 let expected_s what s =
-  Error (Maki_error (Printf.sprintf "maki: bencode: expected %s, got %s" what s))
+  Error (Printf.sprintf "maki: bencode: expected %s, got %s" what s)
 
 let expected_b what b = expected_s what (B.encode_to_string b)
 
 let decode_bencode s =
   try Ok (B.decode (`String s))
   with e ->
-    Error (Maki_error (s ^ " is not valid Bencode: " ^ Printexc.to_string e))
+    Error (s ^ " is not valid Bencode: " ^ Printexc.to_string e)
 
 let assoc k l =
   try Ok (List.assoc k l)
-  with Not_found -> Error (Maki_error ("could not find key " ^ k))
+  with Not_found -> Error ("could not find key " ^ k)
 
 let assoc_or default k l =
   try List.assoc k l
@@ -40,7 +33,7 @@ let as_float = function
     begin try Ok (float_of_string s)
       with _ -> expected_b "float" b
     end
-  | _ -> Error (Maki_error "expected string")
+  | _ -> Error "expected string"
 
 let as_list = function
   | B.List l -> Ok l

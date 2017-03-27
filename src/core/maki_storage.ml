@@ -6,15 +6,18 @@
 open Result
 open Lwt.Infix
 
-type 'a or_error = ('a, exn) Result.result
+type 'a or_error = ('a, string) Result.result
 type path = string
+
+let error = Maki_utils.error
+let errorf = Maki_utils.errorf
 
 type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
   set: string -> string -> unit or_error Lwt.t;
   remove: string -> unit Lwt.t;
-  fold: 'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t;
+  fold: 'a. f:('a -> string * string -> 'a or_error Lwt.t) -> x:'a -> 'a or_error Lwt.t;
   flush_cache: unit -> unit;
 }
 
@@ -30,12 +33,12 @@ let flush_cache t = t.flush_cache ()
 let get_exn t k =
   t.get k >>= function
     | Ok x -> Lwt.return x
-    | Error e -> Lwt.fail e
+    | Error e -> Lwt.fail (Failure e)
 
 let set_exn t k v =
   t.set k v >>= function
     | Ok () -> Lwt.return_unit
-    | Error e -> Lwt.fail e
+    | Error e -> Lwt.fail (Failure e)
 
 module Default = struct
   type t = {
@@ -59,7 +62,7 @@ module Default = struct
           then read_file_ f >|= fun x -> Ok (Some x)
           else Lwt.return (Ok None))
         (fun e ->
-          Lwt.return (Error e))
+          Lwt.return (Error (Printexc.to_string e)))
       >|= fun res ->
       Hashtbl.add t.cache k res;
       res
@@ -80,7 +83,9 @@ module Default = struct
             Lwt_io.flush oc)
         >|= fun () -> Ok ()
       )
-      (fun e -> Lwt.return (Error e))
+      (fun e ->
+         errorf "storage: error when writing `%s`: %s" k (Printexc.to_string e)
+         |> Lwt.return)
 
   let set t k v = Lwt_pool.use t.pool (fun _ -> set_ t k v)
 
@@ -99,13 +104,16 @@ module Default = struct
         then aux acc (* ignore directories *)
         else (
           read_file_ file >>= fun value ->
-          f acc (k,value) >>= aux
+          f acc (k,value) >>=
+          function
+          | Ok acc -> aux acc
+          | Error e -> Lwt.return (Error e)
         )
       | exception (Unix.Unix_error _ as e) ->
         Unix.closedir dir;
         Lwt.fail e
       | exception End_of_file ->
-        Lwt.return acc
+        Lwt.return (Ok acc)
     in
     aux acc
 
@@ -137,7 +145,7 @@ let none = {
   get = (fun _ -> Lwt.return (Result.Ok None));
   set = (fun _ _ -> Lwt.return (Result.Ok ()));
   remove = (fun _ -> Lwt.return_unit);
-  fold = (fun ~f:_ ~x -> Lwt.return x);
+  fold = (fun ~f:_ ~x -> Lwt.return (Ok x));
   flush_cache = (fun () -> ());
 }
 

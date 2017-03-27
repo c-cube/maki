@@ -5,6 +5,16 @@
 
 open Lwt.Infix
 
+type 'a or_error = ('a, string) Result.result
+
+let error msg = Error msg
+let errorf msg =
+  let buf = Buffer.create 64 in
+  let out = Format.formatter_of_buffer buf in
+  Format.kfprintf
+    (fun out -> Format.pp_print_flush out (); error (Buffer.contents buf))
+    out msg
+
 (* thread that prints progress *)
 module ProgressBar = struct
   let nb_sec_minute = 60

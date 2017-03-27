@@ -3,6 +3,12 @@
 
 (** {1 Various Utils} *)
 
+type 'a or_error = ('a, string) Result.result
+
+val error : string -> _ or_error
+val errorf : ('a, Format.formatter, unit, 'b or_error) format4 -> 'a
+
+
 module ProgressBar : sig
   type t
 
@@ -49,5 +55,4 @@ module Cache : sig
       the old value with the new (so a cache entry is evicted when another
       entry with the same hash (modulo size) is added).
       Never grows wider than the given size. *)
-
 end

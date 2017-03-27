@@ -4,7 +4,7 @@
 
 (** {1 On-Disk Storage} *)
 
-type 'a or_error = ('a, exn) Result.result
+type 'a or_error = ('a, string) Result.result
 type path = string
 
 (* TODO:
@@ -25,7 +25,7 @@ type t = {
   get: string -> string option or_error Lwt.t;
   set: string -> string -> unit or_error Lwt.t;
   remove: string -> unit Lwt.t;
-  fold: 'a. f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t;
+  fold: 'a. f:('a -> string * string -> 'a or_error Lwt.t) -> x:'a -> 'a or_error Lwt.t;
   flush_cache: unit -> unit;
 }
 
@@ -44,7 +44,7 @@ val set_exn : t -> string -> string -> unit Lwt.t
 
 val remove : t -> string -> unit Lwt.t
 
-val fold : t -> f:('a -> string * string -> 'a Lwt.t) -> x:'a -> 'a Lwt.t
+val fold : t -> f:('a -> string * string -> 'a or_error Lwt.t) -> x:'a -> 'a or_error Lwt.t
 (** [fold ~f ~x t] folds over all the pairs [key, value] in [t]. *)
 
 val flush_cache : t -> unit
