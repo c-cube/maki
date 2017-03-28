@@ -23,10 +23,10 @@ let () =
   (* TODO: also parse which storage to GC *)
   let s = S.get_default () in
   Lwt_main.run (
-    Maki.gc_storage s
+    Maki.GC.cleanup s
     >>= function
     | Ok stats ->
-      Printf.printf "GC done (%s)\n" (Maki.string_of_gc_stats stats);
+      Printf.printf "GC done (%s)\n" (Maki.GC.string_of_stats stats);
       Lwt.return ()
     | Error e ->
       Printf.printf "error: %s\n" e;

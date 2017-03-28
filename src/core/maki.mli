@@ -207,17 +207,6 @@ module Val_ref : sig
       stored, and decodes it. *)
 end
 
-(** {2 Result of Memoization} *)
-
-module On_disk_result : sig
-  type t
-  val lifetime : t -> lifetime
-  val key : t -> hash
-  val data : t -> encoded_value
-  val children : t -> hash list
-  val tags : t -> string list
-end
-
 (** {2 Arguments of Memoized Functions} *)
 
 (** To memoize a function, Maki must be able to hash the function's input
@@ -348,6 +337,33 @@ val call_pure :
 
     Garbage Collection for the stored values. It needs to be called
     explicitely *)
+
+module GC_info : sig
+  type t =
+    | Keep
+    | KeepUntil of time
+    | CanDrop
+  val lt : t -> t -> bool
+  val of_lifetime : lifetime -> t
+  val codec : t Codec.t
+end
+
+module On_disk_record : sig
+  type t = {
+    gc_info: GC_info.t; (* how long should the GC keep this value *)
+    key: hash; (* hash of the computation *)
+    children: hash list; (* hash of children *)
+    data: encoded_value; (* the actual data *)
+  }
+
+  val gc_info : t -> GC_info.t
+  val key : t -> hash
+  val children : t -> hash list
+  val data : t -> encoded_value
+  val lifetime : t -> lifetime
+
+  val codec : t Codec.t
+end
 
 module GC : sig
   type stats = {

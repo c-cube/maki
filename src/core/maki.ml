@@ -387,6 +387,7 @@ module GC_info : sig
   val lt : t -> t -> bool
   val to_bencode : t -> Bencode.t
   val of_bencode : Bencode.t -> t or_error
+  val codec : t Codec.t
   val of_lifetime : lifetime -> t
 end = struct
   type t =
@@ -416,6 +417,8 @@ end = struct
       end
     | B.String "drop" -> Ok CanDrop
     | b -> errorf "expected lifetime, got `%s`" (Bencode.encode_to_string b)
+
+  let codec = Codec.make_leaf_bencode ~encode:to_bencode ~decode:of_bencode "gc_info"
 
   let of_lifetime = function
     | `CanDrop -> CanDrop
@@ -562,7 +565,7 @@ module Arg = struct
 
     let str_ ctx s = Sha1.update_string ctx s
 
-    let unit _ _ = Lwt.return_unit
+    let unit _ _ = ()
     let int ctx x = str_ ctx (string_of_int x)
     let bool ctx x = str_ ctx (string_of_bool x)
     let float ctx x = str_ ctx (string_of_float x)
@@ -578,19 +581,23 @@ module Arg = struct
       str_ ctx (File_ref.path f);
       str_ ctx h
 
+    let program_ref ctx (p:Program_ref.t) =
+      let h = Program_ref.as_file p in
+      file_ref ctx h
+
     let pair h1 h2 ctx (x1,x2) =
-      h1 ctx x1 >>= fun () ->
+      h1 ctx x1;
       h2 ctx x2
 
     let triple h1 h2 h3 ctx (x1,x2,x3) =
-      h1 ctx x1 >>= fun () ->
-      h2 ctx x2 >>= fun () ->
+      h1 ctx x1;
+      h2 ctx x2;
       h3 ctx x3
 
     let quad h1 h2 h3 h4 ctx (x1,x2,x3,x4) =
-      h1 ctx x1 >>= fun () ->
-      h2 ctx x2 >>= fun () ->
-      h3 ctx x3 >>= fun () ->
+      h1 ctx x1;
+      h2 ctx x2;
+      h3 ctx x3;
       h4 ctx x4
 
     (* set: orderless. We compute all hashes, sort, then hash the resulting list *)
@@ -622,21 +629,6 @@ end
 
 (** {2 Memoized Functions} *)
 
-(* map computation_name -> future (serialized) result *)
-type memo_table = (string, string or_error Lwt.t) Hashtbl.t
-
-let memo_table_ : memo_table = Hashtbl.create 64
-
-(* structure, stored on disk, representing the result of some
-   computation. Dependencies are listed for the GC not to collect them *)
-type cache_value = {
-  cv_gc_info: GC_info.t; (* how long should the GC keep this value *)
-  cv_key: hash; (* hash of the computation *)
-  cv_children: hash list; (* hash of children *)
-  cv_data: encoded_value; (* the actual data *)
-  cv_tags: string list; (* tags attached to this particular value *)
-}
-
 (** {2 Result of Memoized Computation} *)
 module Compute_res : sig
   type 'a t
@@ -650,9 +642,11 @@ module Compute_res : sig
 
   val save : ?storage:Storage.t -> ?lifetime:lifetime -> 'a t -> unit or_error Lwt.t
 
-  val get : ?storage:Storage.t -> hash -> 'a Codec.t -> 'a t option or_error Lwt.t
+  val get : ?storage:Storage.t -> ?lifetime:lifetime -> hash -> 'a Codec.t -> 'a t option or_error Lwt.t
 
-  val find : ?storage:Storage.t -> hash -> 'a Codec.t -> 'a t or_error Lwt.t
+  val find : ?storage:Storage.t -> ?lifetime:lifetime -> hash -> 'a Codec.t -> 'a t or_error Lwt.t
+
+  val to_record : ?lifetime:lifetime -> 'a t -> On_disk_record.t
 
   val codec : 'a Codec.t -> 'a t Codec.t
 end = struct
@@ -678,7 +672,7 @@ end = struct
       ] in
     b, children c
 
-  (* [s] is a serialized cached value, turn it into a [cache_value] *)
+  (* [s] is a serialized result, turn it into a result *)
   let decode (codec:'a Codec.t) (b:Bencode.t) : 'a t or_error =
     let open Res_ in
     begin match b with
@@ -699,33 +693,44 @@ end = struct
       ~decode:(decode c)
       "compute_res"
 
+  let save_record_ ~storage key record =
+    Maki_log.logf 3
+      (fun k->k "save result `%s` into storage %s" key (Storage.name storage));
+    let record_s, _ = Codec.encode On_disk_record.codec record in
+    Storage.set storage key record_s
+
+  let to_record ?lifetime (c:_ t): On_disk_record.t =
+    let key = computation_name c in
+    let c_bencode, children = encode c in
+    let c_string = Bencode.encode_to_string c_bencode in
+    On_disk_record.make ?lifetime ~children key c_string
+
   (* specific storage, indexed by [computation_name] rather than by the
      record's sha1 itself *)
   let save ?(storage=Storage.get_default()) ?lifetime (c:_ t) =
     let key = computation_name c in
-    let c_bencode, children = encode c in
-    let c_string = Bencode.encode_to_string c_bencode in
-    Maki_log.logf 3
-      (fun k->k "save result `%s` into storage %s" key (Storage.name storage));
-    let record =
-      On_disk_record.make ?lifetime ~children key c_string
-    in
-    let record_s, _ = Codec.encode On_disk_record.codec record in
-    Storage.set storage key record_s
+    let record = to_record ?lifetime c in
+    save_record_ ~storage key record
 
-  let get ?(storage=Storage.get_default ()) k c =
-    Storage.get storage k >>>=
+  let get ?(storage=Storage.get_default ()) ?(lifetime=`CanDrop) key c =
+    Storage.get storage key >>>=
     function
     | None -> E.return None
     | Some s ->
-      Res_.(
-        Codec.decode On_disk_record.codec s >>= fun record ->
-        let s = On_disk_record.data record in
-        Codec.decode (codec c) s >|= fun x-> Some x
-      ) |> Lwt.return
+      let new_gc_info = GC_info.of_lifetime lifetime in
+      Codec.decode On_disk_record.codec s |> Lwt.return >>>= fun record ->
+      (* check if we should refresh the on-disk's value expiration date *)
+      begin
+        if GC_info.lt (On_disk_record.gc_info record) new_gc_info then (
+          let record = {record with On_disk_record.gc_info=new_gc_info} in
+          save_record_ ~storage key record
+        ) else E.return_unit
+      end >>>= fun () ->
+      let s = On_disk_record.data record in
+      Codec.decode (codec c) s |> Res_.map (fun x-> Some x) |> Lwt.return
 
-  let find ?storage k c =
-    get ?storage k c
+  let find ?storage ?lifetime k c =
+    get ?storage ?lifetime k c
     >|= function
     | Ok (Some x) -> Ok x
     | Ok None -> errorf "could not find key %s" k
@@ -739,6 +744,11 @@ let compute_name (fun_name:string) (args:Arg.t list): hash =
   Sha1.update_string ctx fun_name;
   List.iter (fun (Arg.A(h,x)) -> h ctx x) args;
   Sha1.finalize ctx |> Sha1.to_hex
+
+(* map computation_name -> future (serialized) result *)
+type memo_table = (string, encoded_value lazy_t or_error Lwt.t) Hashtbl.t
+
+let memo_table_ : memo_table = Hashtbl.create 64
 
 (*
    - compute a string [s] out of computation and dependencies [to_string]
@@ -756,7 +766,7 @@ let call_
     ?tags
     ~name:fun_name
     ~args
-    ~returning
+    ~(returning:'a Codec.t)
     (f:unit -> 'a or_error Lwt.t) : 'a or_error Lwt.t
   =
   (* compute the "name" of the computation *)
@@ -764,21 +774,22 @@ let call_
   (* compute the result of calling the function, or retrieve the result in
      cache. This returns a [('a * string) or_error Lwt.t] where
      the string is the serialization of the ['a] *)
-  let compute_memoized () =
+  let compute_memoized (): ('a * 'a Compute_res.t) or_error Lwt.t =
     begin match limit with
       | None -> f ()
       | Some l -> Limit.acquire l f
     end
     >>>= fun res ->
     (* store result *)
-    let res_ref = Compute_res.make ?tags name res in
-    Compute_res.save ~storage ?lifetime res_ref >>|= fun () ->
-    res, res_ref
+    Val_ref.store ~storage ?lifetime returning res
+    >>>= fun res_ref ->
+    let compute_res = Compute_res.make ?tags name res_ref in
+    Compute_res.save ~storage ?lifetime compute_res >>|= fun () ->
+    res, compute_res
   in
   (* check on-disk cache *)
-  let check_cache_or_compute () : _ or_error Lwt.t =
-    (* TODO: use Compute_res functions instead *)
-    Storage.get storage name >>>=
+  let check_cache_or_compute () : ('a * 'a Compute_res.t) or_error Lwt.t =
+    Compute_res.get ~storage ?lifetime name returning >>>=
     function
     | None ->
       (* not in cache, perform computation (possibly acquiring
@@ -786,62 +797,55 @@ let call_
       Maki_log.logf 3
         (fun k->k "could not find `%s` in storage %s" name (Storage.name storage));
       compute_memoized ()
-    | Some s ->
+    | Some compute_res ->
       Maki_log.logf 3
         (fun k->k "found result of `%s` in storage %s" name (Storage.name storage));
       (* read result from the raw data *)
-      let res =
-        let open Res_ in
-        Codec.decode Cache_val.codec s >>= fun cv ->
-        Codec.decode returning cv.cv_data >|= fun res -> res, cv
-      in
-      begin match res with
+      let data_ref = Compute_res.result compute_res in
+      Val_ref.find ~storage data_ref >>= fun data ->
+      begin match data with
         | Error e ->
           Maki_log.logf 3
             (fun k->k "cached file for `%s` is invalid, delete it and recompute: %s"
-                computation_name e);
-          Storage.remove storage key >>= fun () ->
+                name e);
+          Storage.remove storage name >>= fun () ->
           compute_memoized ()
-        | Ok ((_,cv) as res) ->
-          (* if new lifetime extends longer than res.cv_gc_info, refresh *)
-          begin
-            if GC_info.lt cv.cv_gc_info cv_gc_info
-            then (
-              let cv = {cv with cv_gc_info} in
-              save_cv storage cv
-            ) else Lwt.return (Ok ())
-          end
-          >>|= fun _ ->
-          res
+        | Ok res -> E.return (res, compute_res)
       end
   in
   (* check memo table *)
   try
-    let future_res = Hashtbl.find memo_table_ key in
+    let future_res = Hashtbl.find memo_table_ name in
     (* ok, some other thread is performing the computation, just wait
-       for it to complete and deserialize the result *)
-    future_res >|= fun s_or_err ->
-    Res_.(s_or_err >>= Codec.decode returning)
+         for it to complete and deserialize the result *)
+    future_res >>>= fun (lazy encoded_value) ->
+    (Codec.decode (Compute_res.codec returning) encoded_value |> Lwt.return)
+    >>|= Compute_res.result
+    >>>= Val_ref.find ~storage
   with Not_found ->
-    let res_serialized, promise_serialized = Lwt.wait () in
+    let res_record, wait_record = Lwt.wait () in
     (* put future result in memo table in case another thread wants to
        compute the same value *)
-    Hashtbl.add memo_table_ key res_serialized;
+    Hashtbl.add memo_table_ name res_record;
     (* compute result *)
     let res = check_cache_or_compute() in
     (* ensure that when [res] terminates, [res_serialized] is updated,
        and cleanup entry from hashtable to avoid clogging memory *)
     Lwt.on_any res
       (function
-        | Ok (_,cv) ->
-          Hashtbl.remove memo_table_ key;
-          Lwt.wakeup promise_serialized (Ok cv.cv_data)
+        | Ok (_, compute_res) ->
+          Hashtbl.remove memo_table_ name;
+          let data = lazy (
+            Compute_res.to_record ?lifetime compute_res
+            |> On_disk_record.data
+          ) in
+          Lwt.wakeup wait_record (Ok data)
         | Error e ->
-          Hashtbl.remove memo_table_ key;
-          Lwt.wakeup promise_serialized (Error e))
+          Hashtbl.remove memo_table_ name;
+          Lwt.wakeup wait_record (Error e))
       (fun e ->
-         Lwt.wakeup promise_serialized
-           (errorf "error when computing %s: %s" key (Printexc.to_string e)));
+         Lwt.wakeup wait_record
+           (errorf "error when computing %s: %s" name (Printexc.to_string e)));
     res >>|= fst
 
 let call
@@ -890,14 +894,16 @@ module GC = struct
     Storage.fold s ~x:()
       ~f:(fun () (key, value) ->
         (* decide whether to add [key] to [set], so it remains alive, or now *)
-        (Codec.decode Cache_val.codec value |> Lwt.return) >>|= fun cv ->
+        (Codec.decode On_disk_record.codec value |> Lwt.return)
+        >>|= fun record ->
         (* remember dependencies of [key] *)
-        let gc_status = match cv.cv_gc_info with
-          | Keep -> `Root
-          | KeepUntil t -> if t >= now then `Root else `Dead
-          | CanDrop -> `Dead
+        let gc_status = match On_disk_record.gc_info record with
+          | GC_info.Keep -> `Root
+          | GC_info.KeepUntil t -> if t >= now then `Root else `Dead
+          | GC_info.CanDrop -> `Dead
         in
-        Hashtbl.add state key {gc_children=cv.cv_children; gc_status};
+        Hashtbl.add state key
+          {gc_children=On_disk_record.children record; gc_status};
         ())
     >>|= fun () ->
     Maki_log.logf 3
