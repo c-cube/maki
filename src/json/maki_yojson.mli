@@ -3,12 +3,12 @@
 
 (** {1 Simple wrapper for Yojson} *)
 
-type 'a or_error = ('a, exn) Result.result
+type 'a or_error = 'a Maki.or_error
 
 (** Yojson.Safe *)
 type json = Yojson.Safe.json
 
-val hash : json Maki.Hash.t
+val hash : json Maki.Arg.Hash.t
 (** Taking json as hash *)
 
 val codec : json Maki.Codec.t
@@ -19,9 +19,9 @@ val make :
   string ->
   'a Maki.Codec.t
 
-val make_str :
+val make_exn :
   to_yojson:('a -> json) ->
-  of_yojson:(json -> ('a, string) Result.result) ->
+  of_yojson:(json -> ('a, exn) Result.result) ->
   string ->
   'a Maki.Codec.t
 
