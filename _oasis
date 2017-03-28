@@ -23,18 +23,19 @@ Flag "demo_build"
   Default:      false
 
 Library maki
-  Path:         src/core/
-  Modules:      Maki, Maki_storage, Maki_lwt_err, Maki_log, Maki_utils
-  BuildDepends: lwt.ppx, lwt.unix, lwt.preemptive, sha, bencode, result, threads
+  Path:             src/core/
+  Modules:          Maki, Maki_storage
+  InternalModules:  Maki_log, Maki_utils, Maki_lwt_err
+  BuildDepends:     lwt.unix, lwt.preemptive, sha, bencode, result, threads
 
 Library "maki_yojson"
-  Path:         src/json
-  Modules:      Maki_yojson
-  FindlibName:  yojson
-  FindlibParent:maki
-  Build$:       flag(yojson)
-  Install$:     flag(yojson)
-  BuildDepends: maki, yojson
+  Path:           src/json
+  Modules:        Maki_yojson
+  FindlibName:    yojson
+  FindlibParent:  maki
+  Build$:         flag(yojson)
+  Install$:       flag(yojson)
+  BuildDepends:   maki, yojson
 
 Executable maki_gc
   Path:           src/tools/

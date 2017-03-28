@@ -27,6 +27,18 @@ type time = float
 type hash = string
 type encoded_value = string
 
+(** {2 Error Handling} *)
+module E : sig
+  type 'a t = 'a or_error Lwt.t
+
+  val return : 'a -> 'a t
+  val return_unit : unit t
+  val fail : string -> _ t
+  val unwrap_res : ('a, exn) Result.result -> 'a Lwt.t
+  val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+  val ( >|= ) : 'a t -> ('a -> 'b) -> 'b t
+end
+
 (** {2 Controlling Parallelism} *)
 
 module Limit : sig
@@ -40,56 +52,6 @@ module Limit : sig
   val set_j : int -> unit
   (** Should be called at the beginning to set the value of [j].
       @raise Failure if [j] is already evaluated *)
-end
-
-(** {2 Inputs} *)
-
-(** To memoize a function, Maki must be able to hash the function's input
-    arguments. Arguments that hash to the same value are considered
-    identical. We use a cryptographic hash to ensure that the probability
-    of collisions is astronomically low. *)
-
-module Hash : sig
-  type 'a t = Sha1.ctx -> 'a -> unit Lwt.t
-
-  val unit : unit t
-  val int : int t
-  val bool: bool t
-  val string : string t
-  val float : float t
-  val list : 'a t -> 'a list t
-  val array : 'a t -> 'a array t
-
-  val map : ('a -> 'b) -> 'b t -> 'a t
-  (** [map f hash x] encodes [x] using [f], and then uses [hash]
-      to hash [f x]. *)
-
-  val file : path t
-  (** A {b reference} to some file content. This should be compared by
-      hash of the file content *)
-
-  val program : program t
-  (** A {b reference} to some program in the path. This will be turned
-      into an absolute file path first, then handled same as {!file} *)
-
-  val set : 'a t -> 'a list t
-  (** [set op] is similar to {!list}, except the order of elements does
-      not matter. *)
-
-  val marshal : 'a t
-  (** Encode the data into a string using marshal, then hash
-      the string.
-      Caution, this is somewhat unsafe, but useful for quick-and-dirty work. *)
-
-  val pair : 'a t -> 'b t -> ('a * 'b) t
-  val triple : 'a t -> 'b t -> 'c t -> ('a * 'b * 'c) t
-  val quad : 'a t -> 'b t -> 'c t -> 'd t -> ('a * 'b * 'c * 'd) t
-
-  val hash : 'a t -> 'a -> Sha1.t Lwt.t
-  (** Hash a value. *)
-
-  val hash_to_string : 'a t -> 'a -> string Lwt.t
-  (** Hash a value, then encode the hash into a string. *)
 end
 
 (** {2 Codec}
@@ -116,8 +78,26 @@ module Codec : sig
     string ->
     'a t
 
+  val make_leaf :
+    encode:('a -> encoded_value) ->
+    decode:(encoded_value -> 'a or_error) ->
+    string ->
+    'a t
+
   val encode : 'a t -> 'a -> encoded_value * hash list
   val decode : 'a t -> encoded_value -> 'a or_error
+
+  val make_bencode:
+    encode:('a -> Bencode.t * hash list) ->
+    decode:(Bencode.t -> 'a or_error) ->
+    string ->
+    'a t
+
+  val make_leaf_bencode:
+    encode:('a -> Bencode.t) ->
+    decode:(Bencode.t -> 'a or_error) ->
+    string ->
+    'a t
 
   val int : int t
   val string : string t
@@ -128,36 +108,6 @@ module Codec : sig
   val marshal : string -> 'a t
   (** [marshal descr] encodes and decodes using marshal.
       Unsafe, but useful for prototyping. *)
-
-  val to_hash : 'a t -> 'a Hash.t
-  (** Hashing by encoding, then hashing the encoded value *)
-end
-
-(** {2 Arguments of a function} *)
-
-(** A memoized function takes a list of arguments paired with a
-    hash function. *)
-module Arg : sig
-  type t = A : 'a Hash.t * 'a -> t
-
-  val make : 'a Hash.t -> 'a -> t
-
-  val int : int -> t
-  val unit : unit -> t
-  val bool: bool -> t
-  val string : string -> t
-  val float : float -> t
-  val list : 'a Hash.t -> 'a list -> t
-  val array : 'a Hash.t -> 'a array -> t
-  val file : path -> t
-  val program : program -> t
-  val set : 'a Hash.t -> 'a list -> t
-  val marshal : 'a -> t
-  (** See {!Hash.marshal} *)
-
-  val pair : 'a Hash.t -> 'b Hash.t -> ('a * 'b) -> t
-  val triple : 'a Hash.t -> 'b Hash.t -> 'c Hash.t -> ('a * 'b * 'c) -> t
-  val quad : 'a Hash.t -> 'b Hash.t -> 'c Hash.t -> 'd Hash.t -> ('a * 'b * 'c * 'd) -> t
 end
 
 (** {2 On-Disk storage}
@@ -176,6 +126,7 @@ module Time : sig
   val hours : int -> t
   val minutes : int -> t
   val days : int -> t
+  val weeks : int -> t
   val now : unit -> t
   val (++) : t -> t -> t
 end
@@ -188,10 +139,50 @@ type lifetime =
   | `CanDrop
   ]
 
+val default_lifetime : lifetime
+(** Default lifetime for values *)
+
 (** {2 Value Stored on Disk} *)
 
-module On_disk_val : sig
+module File_ref : sig
+  type t
+  (** An immutable reference to a file, as a path, with a hash of its
+      content.
+      If the file changes on the filesystem, the reference becomes
+      invalid. *)
+
+  val path : t -> path
+  val hash : t -> hash
+
+  val to_string : t -> string
+
+  val compute : path -> t or_error Lwt.t
+  (** Make a file ref out of a simple path *)
+
+  val is_valid : t -> bool Lwt.t
+  (** Check if the reference is up-to-date (i.e. the file content
+      did not change) *)
+
+  val codec : t Codec.t
+end
+
+module Program_ref : sig
+  type t
+
+  val find : path -> path or_error Lwt.t
+
+  val make : path -> t or_error Lwt.t
+
+  val as_file : t -> File_ref.t
+
+  val codec : t Codec.t
+end
+
+(** {6 Reference to On-Disk Value} *)
+module Val_ref : sig
   type 'a t = 'a Codec.t * hash
+
+  val hash : _ t -> hash
 
   val store :
     ?storage:Maki_storage.t ->
@@ -225,6 +216,79 @@ module On_disk_result : sig
   val data : t -> encoded_value
   val children : t -> hash list
   val tags : t -> string list
+end
+
+(** {2 Arguments of Memoized Functions} *)
+
+(** To memoize a function, Maki must be able to hash the function's input
+    arguments. Arguments that hash to the same value are considered
+    identical. We use a cryptographic hash to ensure that the probability
+    of collisions is astronomically low.
+
+    An argument is then the pair of the value and its hash function;
+    if the result is stored (by the computation's hash), we return it,
+    otherwise we compute the value.
+
+    Example: to pass a [int list] as argument:
+    {[
+      Arg.(Hash.(list int) @:: [41; 0; 1] )
+    ]}
+*)
+module Arg : sig
+  module Hash : sig
+    type 'a t = Sha1.ctx -> 'a -> unit
+
+    val unit : unit t
+    val int : int t
+    val bool: bool t
+    val string : string t
+    val float : float t
+    val list : 'a t -> 'a list t
+    val array : 'a t -> 'a array t
+
+    val map : ('a -> 'b) -> 'b t -> 'a t
+    (** [map f hash x] encodes [x] using [f], and then uses [hash]
+        to hash [f x]. *)
+
+    val file_ref : File_ref.t t
+    (** How to hash a file ref *)
+
+    val program_ref : Program_ref.t t
+    (** How to hash a program ref *)
+
+    val set : 'a t -> 'a list t
+    (** [set op] is similar to {!list}, except the order of elements does
+        not matter. *)
+
+    val marshal : 'a t
+    (** Encode the data into a string using marshal, then hash
+        the string.
+        Caution, this is somewhat unsafe, but useful for quick-and-dirty work. *)
+
+    val pair : 'a t -> 'b t -> ('a * 'b) t
+    val triple : 'a t -> 'b t -> 'c t -> ('a * 'b * 'c) t
+    val quad : 'a t -> 'b t -> 'c t -> 'd t -> ('a * 'b * 'c * 'd) t
+
+    val hash : 'a t -> 'a -> Sha1.t
+    (** Hash a value. *)
+
+    val hash_to_string : 'a t -> 'a -> string
+    (** Hash a value, then encode the hash into a string. *)
+
+    val of_codec : 'a Codec.t -> 'a t
+    (** Hashing by encoding, then hashing the encoded value *)
+  end
+
+  type t = A : 'a Hash.t * 'a -> t
+(** A pair of a value (in case we need to compute) and a hash
+    function (to check whether a result is computed already) *)
+
+  val make : 'a Hash.t -> 'a -> t
+
+  module Infix : sig
+    val (@::) : 'a Hash.t -> 'a -> t (** Infix alias to {!make} *)
+  end
+  include module type of Infix
 end
 
 (** {2 Memoized Functions}
@@ -268,7 +332,7 @@ val call :
     @param returning how to encode/decode the result on disk
 *)
 
-val call_exn :
+val call_pure :
   ?bypass:bool ->
   ?storage:Storage.t ->
   ?lifetime:lifetime ->
@@ -277,32 +341,34 @@ val call_exn :
   name:string ->
   args:Arg.t list ->
   returning:'a Codec.t ->
-  (unit -> 'a or_error Lwt.t) ->
-  'a Lwt.t
-(** Same as {!call} but raises the exception instead of wrapping it in Error *)
+  (unit -> 'a Lwt.t) ->
+  'a or_error Lwt.t
 
 (** {2 GC}
 
     Garbage Collection for the stored values. It needs to be called
     explicitely *)
 
-type gc_stats = {
-  gc_kept: int;
-  gc_removed: int;
-}
+module GC : sig
+  type stats = {
+    roots: int;
+    kept: int; (* ≥ roots *)
+    removed: int;
+  }
 
-val string_of_gc_stats : gc_stats -> string
+  val string_of_stats : stats -> string
 
-val gc_storage : Storage.t -> gc_stats or_error Lwt.t
-(** [gc_storage s] removes uneeded values and uneeded dependencies,
-    and returns some statistics. It might take a long time. *)
+  val cleanup : Storage.t -> stats or_error Lwt.t
+  (** [cleanup s] removes uneeded values and uneeded dependencies,
+      and returns some statistics. It might take a long time. *)
+end
 
 (** {2 Utils} *)
 
 val last_mtime : path -> time or_error
 (** Last modification time of the file *)
 
-val sha1 : path -> string Lwt.t
+val sha1 : path -> string or_error Lwt.t
 (** [sha1 f] hashes the file [f] *)
 
 val sha1_of_string : string -> string
@@ -313,14 +379,16 @@ val abspath : path -> path
 
 val shell :
   ?timeout:float -> ?stdin:string ->
-  string -> (string * string * int) Lwt.t
+  string ->
+  (string * string * int) or_error Lwt.t
 (** [shell cmd] runs the command [cmd] and
     returns [stdout, sterr, errcode].
     @param stdin optional input to the sub-process *)
 
 val shellf :
   ?timeout:float -> ?stdin:string ->
-  ('a, Format.formatter, unit, (string * string * int) Lwt.t) format4 -> 'a
+  ('a, Format.formatter, unit, (string * string * int) or_error Lwt.t) format4
+  -> 'a
 (** Same as {!shell} but with a format string. Careful with escaping! *)
 
 (* TODO: globbing, for depending on lists of files easily *)
