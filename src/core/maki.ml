@@ -711,16 +711,23 @@ f
   with Not_found ->
     let res_serialized, promise_serialized = Lwt.wait () in
     (* put future result in memo table in case another thread wants to
-       compute the same value *)
+       compute the same value at the same time *)
     Hashtbl.add memo_table_ h_computation_name res_serialized;
     (* compute result *)
     let res = check_cache_or_compute() in
-    (* ensure that when [res] terminates, [res_serialized] is updated *)
+    (* ensure that when [res] terminates, [res_serialized] is updated,
+       and cleanup entry from hashtable to avoid clogging memory *)
     Lwt.on_any res
       (function
-        | Ok (_,cv) -> Lwt.wakeup promise_serialized (Ok cv.cv_data)
-        | Error e -> Lwt.wakeup promise_serialized (Error e))
-      (fun e -> Lwt.wakeup promise_serialized (Error e));
+        | Ok (_,cv) ->
+          Hashtbl.remove memo_table_ h_computation_name;
+          Lwt.wakeup promise_serialized (Ok cv.cv_data)
+        | Error e ->
+          Hashtbl.remove memo_table_ h_computation_name;
+          Lwt.wakeup promise_serialized (Error e))
+      (fun e ->
+         Hashtbl.remove memo_table_ h_computation_name;
+         Lwt.wakeup promise_serialized (Error e));
     res >>|= fst
 
 let call
