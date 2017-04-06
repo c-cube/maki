@@ -183,8 +183,12 @@ end
 (** {6 Reference to On-Disk Value} *)
 module Ref : sig
   type 'a t = 'a Codec.t * hash
+  (** A reference to some value of type ['a], referred to by the
+      hash of the value.
+      The codec is there to deserialize the value when it's dereferenced. *)
 
   val hash : _ t -> hash
+  (** Recover the hash corresponding to the reference. *)
 
   val store :
     ?storage:Maki_storage.t ->
@@ -199,7 +203,8 @@ module Ref : sig
     'a t ->
     'a or_error Lwt.t
   (** [find codec h] fetches the value whose hash is [h], assuming it
-      is stored, and decodes it. *)
+      is stored, and decodes it. Returns an error if the value is
+      not present. *)
 
   val get :
     ?storage:Maki_storage.t ->
@@ -271,8 +276,13 @@ module Arg : sig
   end
 
   type t = A : 'a Hash.t * 'a -> t
-(** A pair of a value (in case we need to compute) and a hash
-    function (to check whether a result is computed already) *)
+  (** A pair of a value (in case we need to compute) and a hash
+      function (to check whether a result is computed already).
+  
+      Typically one would use {!@::}:
+
+      - {[  int @:: 42 ]}
+      - {[ list string @ ["a"; "b"] ]} *)
 
   val make : 'a Hash.t -> 'a -> t
 
