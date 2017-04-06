@@ -176,6 +176,8 @@ module Program_ref : sig
   val as_file : t -> File_ref.t
 
   val codec : t Codec.t
+
+  val to_string : t -> string
 end
 
 (** {6 Reference to On-Disk Value} *)
@@ -349,12 +351,7 @@ module GC_info : sig
 end
 
 module On_disk_record : sig
-  type t = {
-    gc_info: GC_info.t; (* how long should the GC keep this value *)
-    key: hash; (* hash of the computation *)
-    children: hash list; (* hash of children *)
-    data: encoded_value; (* the actual data *)
-  }
+  type t
 
   val gc_info : t -> GC_info.t
   val key : t -> hash

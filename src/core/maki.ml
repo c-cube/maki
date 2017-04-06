@@ -320,6 +320,7 @@ module Program_ref : sig
   val make : path -> t or_error Lwt.t
   val as_file : t -> File_ref.t
   val codec : t Codec.t
+  val to_string : t -> string
 end = struct
   type t = File_ref.t
 
@@ -354,6 +355,8 @@ end = struct
     else Lwt.return (Ok f)
 
   let make (f:path) = find f >>>= File_ref.compute
+
+  let to_string = File_ref.to_string
 end
 
 (** {2 Time Utils} *)
