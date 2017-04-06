@@ -954,3 +954,38 @@ module GC = struct
         Lwt.return (Ok stats)
     end
 end
+
+let walk
+    ?(filter=fun _ -> true)
+    ?(recursive=true)
+    ?(which=[`File;`Dir])
+    dir =
+  let dir = abspath dir in
+  let rec walk ~rec_ acc file =
+    if not (Sys.file_exists file) then acc
+    else if not (filter file) then acc
+    else (
+      (* yield this particular file? *)
+      let acc =
+        if filter file &&
+           ((Sys.is_directory file &&
+             List.mem `Dir which) ||
+            (not (Sys.is_directory file) &&
+             List.mem `File which))
+        then file :: acc
+        else acc
+      in
+      if Sys.is_directory file then (
+        (* try to list the directory *)
+        let arr = try Sys.readdir file with Sys_error _ -> [||] in
+        Array.fold_left
+          (fun acc sub ->
+             (* abspath *)
+             let sub = Filename.concat file sub in
+             walk ~rec_:(rec_ && recursive) acc sub)
+          acc arr
+      ) else acc
+    )
+  in
+  try walk ~rec_:true [] dir |> E.return
+  with e -> E.fail (Printexc.to_string e)

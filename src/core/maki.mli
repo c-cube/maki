@@ -414,5 +414,19 @@ val shellf :
   -> 'a
 (** Same as {!shell} but with a format string. Careful with escaping! *)
 
+val walk :
+  ?filter:(path -> bool) ->
+  ?recursive:bool ->
+  ?which:[`File | `Dir] list ->
+  path ->
+  path list or_error Lwt.t
+(** [walk dir] traverses the directory and yields
+    its content, by {b absolute} path.
+    @param which filters on the type of the content
+    @param recursive if true, walks into subdirectories too
+    @param filter filters the absolute path of objects
+      and yields only these which satisfy the predicate
+*)
+
 (* TODO: globbing, for depending on lists of files easily *)
 
