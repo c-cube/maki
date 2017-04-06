@@ -179,7 +179,7 @@ module Program_ref : sig
 end
 
 (** {6 Reference to On-Disk Value} *)
-module Val_ref : sig
+module Ref : sig
   type 'a t = 'a Codec.t * hash
 
   val hash : _ t -> hash

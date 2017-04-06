@@ -509,7 +509,7 @@ end
 
 (** {2 Reference to On-Disk Value} *)
 
-module Val_ref = struct
+module Ref = struct
   type 'a t = 'a Codec.t * hash
 
   let hash = snd
@@ -635,10 +635,10 @@ module Compute_res : sig
 
   val computation_name : _ t -> hash
   val tags : _ t -> string list
-  val result : 'a t -> 'a Val_ref.t
+  val result : 'a t -> 'a Ref.t
   val children : _ t -> hash list
 
-  val make : ?tags:string list -> hash -> 'a Val_ref.t -> 'a t
+  val make : ?tags:string list -> hash -> 'a Ref.t -> 'a t
 
   val save : ?storage:Storage.t -> ?lifetime:lifetime -> 'a t -> unit or_error Lwt.t
 
@@ -652,14 +652,14 @@ module Compute_res : sig
 end = struct
   type 'a t = {
     computation_name: hash; (** computed value (hash of) *)
-    result: 'a Val_ref.t; (** reference to the result *)
+    result: 'a Ref.t; (** reference to the result *)
     tags: string list; (** Some metadata *)
   }
 
   let tags c = c.tags
   let result c = c.result
   let computation_name c = c.computation_name
-  let children c = [c.result |> Val_ref.hash]
+  let children c = [c.result |> Ref.hash]
 
   let make ?(tags=[]) name result = {tags; computation_name=name; result}
 
@@ -667,7 +667,7 @@ end = struct
   let encode c =
     let b = B.Dict
       [ "name", BM.mk_str (computation_name c);
-        "ref", BM.mk_str (result c |> Val_ref.hash);
+        "ref", BM.mk_str (result c |> Ref.hash);
         "tags", BM.mk_list (List.map BM.mk_str (tags c));
       ] in
     b, children c
@@ -678,7 +678,7 @@ end = struct
     begin match b with
       | B.Dict l ->
         BM.assoc "ref" l >>= BM.as_str >>= fun hash ->
-        let result : _ Val_ref.t = codec, hash in
+        let result : _ Ref.t = codec, hash in
         BM.assoc "name" l >>= BM.as_str >>= fun name ->
         BM.assoc_or (B.List []) "tags" l
         |> BM.as_list >>= map_l BM.as_str >|= fun tags ->
@@ -733,7 +733,7 @@ end = struct
     get ?storage ?lifetime k c
     >|= function
     | Ok (Some x) -> Ok x
-    | Ok None -> errorf "could not find key %s" k
+    | Ok None -> errorf "could not find key `%s`" k
     | Error _ as e -> e
 end
 
@@ -781,7 +781,7 @@ let call_
     end
     >>>= fun res ->
     (* store result *)
-    Val_ref.store ~storage ?lifetime returning res
+    Ref.store ~storage ?lifetime returning res
     >>>= fun res_ref ->
     let compute_res = Compute_res.make ?tags name res_ref in
     Compute_res.save ~storage ?lifetime compute_res >>|= fun () ->
@@ -802,7 +802,7 @@ let call_
         (fun k->k "found result of `%s` in storage %s" name (Storage.name storage));
       (* read result from the raw data *)
       let data_ref = Compute_res.result compute_res in
-      Val_ref.find ~storage data_ref >>= fun data ->
+      Ref.find ~storage data_ref >>= fun data ->
       begin match data with
         | Error e ->
           Maki_log.logf 3
@@ -821,7 +821,7 @@ let call_
     future_res >>>= fun (lazy encoded_value) ->
     (Codec.decode (Compute_res.codec returning) encoded_value |> Lwt.return)
     >>|= Compute_res.result
-    >>>= Val_ref.find ~storage
+    >>>= Ref.find ~storage
   with Not_found ->
     let res_record, wait_record = Lwt.wait () in
     (* put future result in memo table in case another thread wants to
