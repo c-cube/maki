@@ -1,25 +1,27 @@
 (* Naive fibonacci function *)
 
-open Lwt.Infix
+open Maki.E
 
 let rec fib n =
-  if n<= 1 then Lwt.return 1
+  if n<= 1 then return 1
   else
     let n1 = fib_memo (n-1) in
     let n2 = fib_memo (n-2) in
     n1 >>= fun n1 -> n2 >|= fun n2 -> n1+n2
 
 and fib_memo n =
-  Maki.call_exn
+  Maki.call
     ~lifetime:(`KeepFor (Maki.Time.minutes 20))
     ~name:"fib"
-    ~op:Maki.Value.int
-    ~deps:[Maki.Value.pack_int n]
+    ~returning:Maki.Codec.int
+    ~args:Maki.Arg.([Hash.int @:: n])
     (fun () -> fib n)
 
 let main n =
-  fib n >|= fun n ->
-  Printf.printf "result: %d\n" n
+  let open Lwt.Infix in
+  fib n >|= function
+  | Error msg -> Printf.printf "error: %s\n" msg
+  | Ok n -> Printf.printf "result: %d\n" n
 
 let () =
   let n = ref 20 in
