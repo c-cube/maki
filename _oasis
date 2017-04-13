@@ -25,7 +25,8 @@ Flag "demo_build"
 Library maki
   Path:             src/core/
   Modules:          Maki, Maki_storage
-  InternalModules:  Maki_log, Maki_utils, Maki_lwt_err
+  InternalModules:  Maki_log, Maki_utils, Maki_lwt_err,
+                    Maki_bencode
   BuildDepends:     lwt.unix, lwt.preemptive, sha, bencode, result, threads
 
 Library "maki_yojson"
