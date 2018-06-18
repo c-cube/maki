@@ -1,0 +1,8 @@
+
+(executables
+  ((names (maki_gc maki_display))
+   (public_names (maki_gc maki_display))
+   (modes (native))
+   (package maki)
+   (libraries (maki))))
+

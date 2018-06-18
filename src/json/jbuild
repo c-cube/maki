@@ -1,0 +1,8 @@
+
+(library
+  ((name maki_yojson)
+   (public_name maki.yojson)
+   (wrapped true)
+   (optional)
+   (flags (:standard -safe-string))
+   (libraries (maki yojson))))

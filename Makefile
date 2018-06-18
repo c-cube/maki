@@ -1,49 +1,19 @@
-# OASIS_START
-# DO NOT EDIT (digest: 4c293511860bb966e727ba6f0ecc8197)
 
-SETUP = ./setup.exe
+all: build
 
-build: setup.data $(SETUP)
-	$(SETUP) -build $(BUILDFLAGS)
+build:
+	jbuilder build @install
 
-doc: setup.data $(SETUP) build
-	$(SETUP) -doc $(DOCFLAGS)
+test:
+	jbuilder runtest --no-buffer --force
 
-test: setup.data $(SETUP) build
-	$(SETUP) -test $(TESTFLAGS)
+doc:
+	jbuilder build @doc
 
-all: $(SETUP)
-	$(SETUP) -all $(ALLFLAGS)
+clean:
+	jbuilder clean
 
-install: setup.data $(SETUP)
-	$(SETUP) -install $(INSTALLFLAGS)
-
-uninstall: setup.data $(SETUP)
-	$(SETUP) -uninstall $(UNINSTALLFLAGS)
-
-reinstall: setup.data $(SETUP)
-	$(SETUP) -reinstall $(REINSTALLFLAGS)
-
-clean: $(SETUP)
-	$(SETUP) -clean $(CLEANFLAGS)
-
-distclean: $(SETUP)
-	$(SETUP) -distclean $(DISTCLEANFLAGS)
-	$(RM) $(SETUP)
-
-setup.data: $(SETUP)
-	$(SETUP) -configure $(CONFIGUREFLAGS)
-
-configure: $(SETUP)
-	$(SETUP) -configure $(CONFIGUREFLAGS)
-
-setup.exe: setup.ml _oasis
-	ocamlfind ocamlopt -o $@ -linkpkg -package oasis.dynrun setup.ml || ocamlfind ocamlc -o $@ -linkpkg -package oasis.dynrun setup.ml || true
-	$(RM) setup.cmi setup.cmo setup.cmx setup.o
-
-.PHONY: build doc test all install uninstall reinstall clean distclean configure
-
-# OASIS_STOP
+.PHONY: all build test clean doc
 
 upload-doc: doc
 	git checkout gh-pages && \

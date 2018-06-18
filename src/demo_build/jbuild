@@ -1,0 +1,5 @@
+
+(executable
+  ((name maki_build)
+   (libraries (maki containers containers.data oasis-parser lwt lwt.ppx))))
+
