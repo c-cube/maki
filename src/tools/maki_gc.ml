@@ -3,7 +3,7 @@
 
 (** {1 Maki GC implementation} *)
 
-module S = Maki_storage
+module S = Maki.Storage
 
 open Result
 open Lwt.Infix
@@ -11,8 +11,8 @@ open Lwt.Infix
 let parse_argv () =
   let options =
     Arg.align
-      [ "--debug", Arg.Int Maki_log.set_level, " set debug level";
-        "-d", Arg.Int Maki_log.set_level, " short for --debug";
+      [ "--debug", Arg.Int Maki.Log.set_level, " set debug level";
+        "-d", Arg.Int Maki.Log.set_level, " short for --debug";
       ]
   in
   Arg.parse options (fun _ -> ()) "usage: maki_gc [options]";

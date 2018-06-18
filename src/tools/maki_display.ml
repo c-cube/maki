@@ -8,8 +8,8 @@ open Lwt.Infix
 type 'a or_error = 'a Maki.or_error
 
 let collect_entries s : (string * Maki.On_disk_record.t) list or_error Lwt.t =
-  Maki_log.log 3 "display: collecting values...";
-  Maki_storage.fold s ~x:[]
+  Maki.Log.log 3 "display: collecting values...";
+  Maki.Storage.fold s ~x:[]
     ~f:(fun acc (key, value) ->
       let open Maki.E in
       (Maki.Codec.decode Maki.On_disk_record.codec value |> Lwt.return)
@@ -35,13 +35,13 @@ let print_entries l =
 let () =
   let options =
     Arg.align
-      [ "--debug", Arg.Int Maki_log.set_level, " set debug level"
-      ; "-d", Arg.Int Maki_log.set_level, " short for --debug"
+      [ "--debug", Arg.Int Maki.Log.set_level, " set debug level"
+      ; "-d", Arg.Int Maki.Log.set_level, " short for --debug"
       ]
   in
   Arg.parse options (fun _ -> ()) "usage: maki_display [options]";
   (* TODO: also parse which storage to GC *)
-  let s = Maki_storage.get_default () in
+  let s = Maki.Storage.get_default () in
   Lwt_main.run (
     let res =
       let open Maki.E in

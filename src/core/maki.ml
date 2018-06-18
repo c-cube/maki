@@ -6,6 +6,9 @@
 open Result
 open Lwt.Infix
 
+module Util = Maki_utils
+module Log = Maki_log
+
 module B = Bencode
 module BM = Maki_bencode
 module Ca = Maki_utils.Cache

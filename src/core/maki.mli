@@ -388,6 +388,8 @@ end
 
 (** {2 Utils} *)
 
+module Util = Maki_utils
+
 val last_mtime : path -> time or_error
 (** Last modification time of the file *)
 
@@ -430,3 +432,6 @@ val walk :
 
 (* TODO: globbing, for depending on lists of files easily *)
 
+(** {2 Logging} *)
+
+module Log = Maki_log

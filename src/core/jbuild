@@ -2,7 +2,7 @@
 (library
   ((name maki)
    (public_name maki)
-   (wrapped false) ; TODO
+   (wrapped true)
    (flags (:standard -safe-string))
    (libraries (lwt.unix lwt.preemptive sha bencode result threads))))
 
