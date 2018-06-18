@@ -19,7 +19,11 @@ Flag "yojson"
   Default:      false
 
 Flag "demo_build"
-  Description:  build the toy build system on top of maki+oasis-parser
+  Description:  build the toy build system on top of maki+oasis-parser.
+  Default:      false
+
+Flag "demo_index"
+  Description:  index ~/.opam build files using ocamlobjinfo.
   Default:      false
 
 Library maki
@@ -67,6 +71,14 @@ Executable test_fib
   Install:        false
   Build$:         flag(tests)
   BuildDepends:   maki
+
+Executable demo_index
+  Path:           src/demo_index/
+  MainIs:         maki_index.ml
+  CompiledObject: best
+  Install:        false
+  Build$:         flag(demo_index)
+  BuildDepends:   maki, containers
 
 Document maki
   Title:                Maki docs
