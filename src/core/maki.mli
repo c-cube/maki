@@ -381,9 +381,10 @@ module GC : sig
 
   val string_of_stats : stats -> string
 
-  val cleanup : Storage.t -> stats or_error Lwt.t
+  val cleanup : ?force:bool -> Storage.t -> stats or_error Lwt.t
   (** [cleanup s] removes uneeded values and uneeded dependencies,
-      and returns some statistics. It might take a long time. *)
+      and returns some statistics. It might take a long time.
+      @param force if true, ignore roots and remove every entry *)
 end
 
 (** {2 Utils} *)

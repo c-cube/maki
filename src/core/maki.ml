@@ -916,7 +916,7 @@ module GC = struct
       (fun k->k "root collection is done (%d entries)" (Hashtbl.length state));
     state
 
-  let cleanup s: stats or_error Lwt.t =
+  let cleanup ?(force=false) s: stats or_error Lwt.t =
     let now = Unix.gettimeofday () in
     collect_roots now s >>>= fun st ->
     (* actually collect dead cells *)
@@ -928,11 +928,11 @@ module GC = struct
     Hashtbl.iter
       (fun k c ->
          match c.gc_status with
-           | `Alive | `Root ->
+           | (`Alive | `Root) when not force ->
              Maki_log.logf 5 (fun f->f "gc: keep value %s" k);
              if c.gc_status = `Root then incr n_roots;
              incr n_kept
-           | `Dead ->
+           | _ ->
              Maki_log.logf 5 (fun f->f "gc: remove value %s" k);
              Lwt.async
                (fun () ->
