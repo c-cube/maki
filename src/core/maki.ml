@@ -72,6 +72,11 @@ module Limit = struct
   let set_j n =
     if Lazy.is_val j_ then failwith "Limit.set_j: too late to set limit";
     j_init := n
+
+  let map_l lim f l : _ list Lwt.t =
+    Lwt_list.map_p
+      (fun x -> acquire lim (fun () -> f x))
+      l
 end
 
 (** {2 Basic types} *)

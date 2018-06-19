@@ -46,6 +46,10 @@ module Limit : sig
   val create : int -> t
   val acquire : t -> (unit -> 'a Lwt.t) -> 'a Lwt.t
 
+  val map_l : t -> ('a -> 'b Lwt.t) -> 'a list -> 'b list Lwt.t
+  (** [map_l limit f l] maps [f] in parallel on [l], but restricts
+      parallelism using [j] *)
+
   val j : unit -> t
   (** Default limiter for concurrency, should be set by CLI options *)
 
