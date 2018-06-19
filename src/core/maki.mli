@@ -83,21 +83,32 @@ module Codec : sig
     decode:(encoded_value -> 'a or_error) ->
     string ->
     'a t
+  (** Encode an atomic value, as a leaf of the dependency graph.
+      The value cannot depend on any other value (see {!make} for that) *)
 
   val encode : 'a t -> 'a -> encoded_value * hash list
+  (** [encode codec x] uses the [codec] to encode [x] into a string that
+      can be persisted to some {!Storage}.
+      It also returns the list of hashes of other values this one
+      depends on *)
+
   val decode : 'a t -> encoded_value -> 'a or_error
+  (** [decode codec s] tries to decode the string [s] using [codec]
+      into a proper value *)
 
   val make_bencode:
     encode:('a -> Bencode.t * hash list) ->
     decode:(Bencode.t -> 'a or_error) ->
     string ->
     'a t
+  (** Encode via a conversion to Bencode *)
 
   val make_leaf_bencode:
     encode:('a -> Bencode.t) ->
     decode:(Bencode.t -> 'a or_error) ->
     string ->
     'a t
+  (** Encode a leaf via bencode *)
 
   val int : int t
   val string : string t
@@ -107,7 +118,9 @@ module Codec : sig
 
   val marshal : string -> 'a t
   (** [marshal descr] encodes and decodes using marshal.
-      Unsafe, but useful for prototyping. *)
+      Unsafe, but useful for prototyping.
+      @param descr the (unique) description of this type. It might be
+      a good idea to version it to avoid segfaults at decoding time.  *)
 end
 
 (** {2 Persistent storage}
