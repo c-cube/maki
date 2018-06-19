@@ -135,11 +135,21 @@ module Default = struct
 
   let flush t () = Hashtbl.clear t.cache
 
+  let split_dir_ =
+    let rec aux acc s =
+      let parent = Filename.dirname s in
+      if parent = "." || parent="/" then s::acc
+      else aux (s::acc) parent
+    in
+    aux []
+
   let create dir =
-    (* first, create dir *)
-    begin try Unix.mkdir dir 0o755
-      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-    end;
+    (* first, create dir (and parents, recursively) *)
+    List.iter
+      (fun s -> 
+         try Unix.mkdir s 0o755
+         with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+      (split_dir_ dir);
     let t =
       {dir;
        pool=Lwt_pool.create 100 (fun _ -> Lwt.return_unit);
