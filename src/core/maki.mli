@@ -408,14 +408,15 @@ val mk1 :
     Example: memoizing a recursive function:
 {[
 let fib =
-  let rec fib = lazy Maki.(
+  let rec fib n = Maki.(
       mk1 ~name:"fib" Hash.int Codec.int ~lifetime:Lifetime.one_minute
         ~f:(fun x -> if x <= 1
           then return_ok 1
-          else (Lazy.force fib (x-1) >>= fun x1 ->
-              Lazy.force fib (x-2) >|= fun x2 -> x1+x2))
+          else (fib (x-1) >>= fun x1 ->
+            fib (x-2) >|= fun x2 -> x1+x2))
+        n
     ) in
-  Lazy.force fib;;
+  fib;;
 
 fib 42 ;;
 (* returns [Ok 42] *)
