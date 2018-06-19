@@ -16,13 +16,14 @@ let collect_entries s : (string * Maki.On_disk_record.t) list or_error Lwt.t =
       >|= fun c -> (key,c) :: acc)
 
 let print_entries l =
+  let module L = Maki.Lifetime in
   let pp_lifetime out = function
-    | `KeepFor _ -> assert false
-    | `KeepUntil t ->
+    | L.KeepFor _ -> assert false
+    | L.KeepUntil t ->
       let now = Unix.gettimeofday () in
       Format.fprintf out "keep for %.1f s" (t -. now)
-    | `CanDrop -> Format.pp_print_string out "can drop"
-    | `Keep -> Format.pp_print_string out "keep"
+    | L.CanDrop -> Format.pp_print_string out "can drop"
+    | L.Keep -> Format.pp_print_string out "keep"
   in
   let pp_pair out (k,c) =
     Format.fprintf out "@[<hv2>`%s` ->@ `%s`@ [key: `%s`, %a]@]"

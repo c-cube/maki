@@ -21,6 +21,7 @@ let (>>|=) = E.(>|=)
 
 type 'a or_error = ('a, string) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
+type 'a printer = Format.formatter -> 'a -> unit
 
 let error = Maki_utils.error
 let errorf msg = Maki_utils.errorf msg
@@ -390,17 +391,29 @@ module Time = struct
   let weeks n = 7. *. days n
   let now () = Unix.gettimeofday()
   let (++) = (+.)
+  let pp out t = Format.fprintf out "%.3fs" t
 end
 
-(* lifetime for a cached value *)
-type lifetime =
-  [ `Keep
-  | `KeepFor of time (** Time delta *)
-  | `KeepUntil of time (** Absolute deadline *)
-  | `CanDrop
-  ]
+module Lifetime = struct
+  type t =
+    | Keep
+    | KeepFor of time (** Time delta *)
+    | KeepUntil of time (** Absolute deadline *)
+    | CanDrop
 
-let default_lifetime : lifetime = `KeepFor (Time.weeks 10)
+  let keep = Keep
+  let can_drop = CanDrop
+  let keep_for t = KeepFor t
+  let keep_until t = KeepUntil t
+
+  let pp out = function
+    | Keep -> Format.pp_print_string out "keep"
+    | CanDrop -> Format.pp_print_string out "can_drop"
+    | KeepFor t -> Format.fprintf out "keep_for %a" Time.pp t
+    | KeepUntil t -> Format.fprintf out "keep_until %a" Time.pp t
+
+  let default : t = keep_for @@ Time.weeks 10
+end
 
 module GC_info : sig
   type t =
@@ -411,7 +424,7 @@ module GC_info : sig
   val to_bencode : t -> Bencode.t
   val of_bencode : Bencode.t -> t or_error
   val codec : t Codec.t
-  val of_lifetime : lifetime -> t
+  val of_lifetime : Lifetime.t -> t
 end = struct
   type t =
     | Keep
@@ -444,10 +457,10 @@ end = struct
   let codec = Codec.make_leaf_bencode ~encode:to_bencode ~decode:of_bencode "gc_info"
 
   let of_lifetime = function
-    | `CanDrop -> CanDrop
-    | `Keep -> Keep
-    | `KeepUntil t -> KeepUntil t
-    | `KeepFor t ->
+    | Lifetime.CanDrop -> CanDrop
+    | Lifetime.Keep -> Keep
+    | Lifetime.KeepUntil t -> KeepUntil t
+    | Lifetime.KeepFor t ->
       let now = Unix.gettimeofday () in
       KeepUntil (now +. t)
 end
@@ -467,7 +480,7 @@ module On_disk_record : sig
   }
 
   val make :
-    ?lifetime:lifetime ->
+    ?lifetime:Lifetime.t ->
     ?children:hash list ->
     hash ->
     encoded_value ->
@@ -477,7 +490,7 @@ module On_disk_record : sig
   val key : t -> hash
   val children : t -> hash list
   val data : t -> encoded_value
-  val lifetime : t -> lifetime
+  val lifetime : t -> Lifetime.t
 
   val codec : t Codec.t
 end = struct
@@ -493,7 +506,7 @@ end = struct
   let data c = c.data
   let gc_info c = c.gc_info
 
-  let make ?(lifetime=default_lifetime) ?(children=[]) key data =
+  let make ?(lifetime=Lifetime.default) ?(children=[]) key data =
     let gc_info = GC_info.of_lifetime lifetime in
     { gc_info; children; key; data; }
 
@@ -525,9 +538,9 @@ end = struct
   let codec = Codec.make_leaf_bencode ~encode ~decode "on_disk_record"
 
   let lifetime c = match c.gc_info with
-    | GC_info.Keep  -> `Keep
-    | GC_info.KeepUntil t -> `KeepUntil t
-    | GC_info.CanDrop  -> `CanDrop
+    | GC_info.Keep  -> Lifetime.Keep
+    | GC_info.KeepUntil t -> Lifetime.KeepUntil t
+    | GC_info.CanDrop  -> Lifetime.CanDrop
 end
 
 (** {2 Reference to On-Disk Value} *)
@@ -665,13 +678,13 @@ module Compute_res : sig
 
   val make : ?tags:string list -> hash -> 'a Ref.t -> 'a t
 
-  val save : ?storage:Storage.t -> ?lifetime:lifetime -> 'a t -> unit or_error Lwt.t
+  val save : ?storage:Storage.t -> ?lifetime:Lifetime.t -> 'a t -> unit or_error Lwt.t
 
-  val get : ?storage:Storage.t -> ?lifetime:lifetime -> hash -> 'a Codec.t -> 'a t option or_error Lwt.t
+  val get : ?storage:Storage.t -> ?lifetime:Lifetime.t -> hash -> 'a Codec.t -> 'a t option or_error Lwt.t
 
-  val find : ?storage:Storage.t -> ?lifetime:lifetime -> hash -> 'a Codec.t -> 'a t or_error Lwt.t
+  val find : ?storage:Storage.t -> ?lifetime:Lifetime.t -> hash -> 'a Codec.t -> 'a t or_error Lwt.t
 
-  val to_record : ?lifetime:lifetime -> 'a t -> On_disk_record.t
+  val to_record : ?lifetime:Lifetime.t -> 'a t -> On_disk_record.t
 
   val codec : 'a Codec.t -> 'a t Codec.t
 end = struct
@@ -737,7 +750,7 @@ end = struct
     let record = to_record ?lifetime c in
     save_record_ ~storage key record
 
-  let get ?(storage=Storage.get_default ()) ?(lifetime=`CanDrop) key c =
+  let get ?(storage=Storage.get_default ()) ?(lifetime=Lifetime.CanDrop) key c =
     Storage.get storage key >>>=
     function
     | None -> E.return None

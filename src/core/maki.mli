@@ -15,6 +15,7 @@
 
 type 'a or_error = ('a, string) Result.result
 type 'a lwt_or_error = 'a or_error Lwt.t
+type 'a printer = Format.formatter -> 'a -> unit
 
 val error : string -> _ or_error
 val errorf : ('a, Format.formatter, unit, 'b or_error) format4 -> 'a
@@ -195,18 +196,27 @@ module Time : sig
   val weeks : int -> t
   val now : unit -> t
   val (++) : t -> t -> t
+  val pp : t printer
 end
 
-(** lifetime for a value on disk *)
-type lifetime =
-  [ `Keep
-  | `KeepFor of time (** Time delta *)
-  | `KeepUntil of time (** Absolute deadline *)
-  | `CanDrop
-  ]
+(** {2 lifetime for a value on disk}  *)
+module Lifetime : sig
+  type t =
+    | Keep
+    | KeepFor of time (** Time delta *)
+    | KeepUntil of time (** Absolute deadline *)
+    | CanDrop
 
-val default_lifetime : lifetime
-(** Default lifetime for values *)
+  val keep : t
+  val can_drop : t
+  val keep_for : time -> t
+  val keep_until : time -> t
+
+  val pp : t printer
+
+  val default : t
+  (** Default lifetime for values *)
+end
 
 (** {2 Values Stored on Disk} *)
 
@@ -261,7 +271,7 @@ module Ref : sig
 
   val store :
     ?storage:Maki_storage.t ->
-    ?lifetime:lifetime ->
+    ?lifetime:Lifetime.t ->
     'a Codec.t ->
     'a ->
     'a t or_error Lwt.t
@@ -389,7 +399,7 @@ end
 val call :
   ?bypass:bool ->
   ?storage:Storage.t ->
-  ?lifetime:lifetime ->
+  ?lifetime:Lifetime.t ->
   ?limit:Limit.t ->
   ?tags:string list ->
   name:string ->
@@ -412,7 +422,7 @@ val call :
 val call_pure :
   ?bypass:bool ->
   ?storage:Storage.t ->
-  ?lifetime:lifetime ->
+  ?lifetime:Lifetime.t ->
   ?limit:Limit.t ->
   ?tags:string list ->
   name:string ->
@@ -432,7 +442,7 @@ module GC_info : sig
     | KeepUntil of time
     | CanDrop
   val lt : t -> t -> bool
-  val of_lifetime : lifetime -> t
+  val of_lifetime : Lifetime.t -> t
   val codec : t Codec.t
 end
 
@@ -443,7 +453,7 @@ module On_disk_record : sig
   val key : t -> hash
   val children : t -> hash list
   val data : t -> encoded_value
-  val lifetime : t -> lifetime
+  val lifetime : t -> Lifetime.t
 
   val codec : t Codec.t
 end
