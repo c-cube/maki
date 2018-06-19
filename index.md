@@ -2,6 +2,6 @@
 
 Documentation:
 
-- [dev](dev)
+- [dev](dev/maki)
 - [0.1](0.1)
 
