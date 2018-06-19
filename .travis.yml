@@ -1,26 +1,15 @@
 language: c
+install: wget https://raw.githubusercontent.com/ocaml/ocaml-ci-scripts/master/.travis-docker.sh
+script: bash -ex .travis-docker.sh
+services:
+- docker
 env:
-  - OCAML_VERSION=4.02.3
-  - OCAML_VERSION=4.03.0
-  - OCAML_VERSION=4.03.0+flambda
-  - OCAML_VERSION=4.04.0
-  - OCAML_VERSION=4.04.0+flambda
-addons:
-  apt:
-    sources:
-      - avsm
-    packages:
-      - opam
-before_install:
-  - export OPAMYES=1
-  - export OPAMVERBOSE=1
-  - opam init
-  - opam switch -q ${OCAML_VERSION}
-  - eval `opam config env`
-  - opam pin add -n maki ./
-  - opam install maki -q --deps-only
-  - opam install yojson -q # TODO: find a way to automtically install deptopts ?
-install:
-  - opam install -t maki
-script:
-  - opam reinstall maki # Check that reinstallation works as expected
+  global:
+  - PINS="maki:."
+  - DISTRO="ubuntu-16.04"
+  matrix:
+  - PACKAGE="maki" OCAML_VERSION="4.02.3" DEPOPTS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.03.0" DEPOPTS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.04.2" DEPOPTS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.05.0" DEPOPTS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.06.0" DEPOPTS="yojson"
