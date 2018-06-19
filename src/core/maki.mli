@@ -39,6 +39,12 @@ module E : sig
   val ( >|= ) : 'a t -> ('a -> 'b) -> 'b t
 end
 
+(** {2 Hash function}
+
+    A cryptographic hash function used to map objects to (probably) unique keys *)
+
+module Hash : module type of Sha1
+
 (** {2 Controlling Parallelism} *)
 
 module Limit : sig

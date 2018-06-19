@@ -9,6 +9,8 @@ open Lwt.Infix
 module Util = Maki_utils
 module Log = Maki_log
 
+module Hash = Sha1 
+
 module B = Bencode
 module BM = Maki_bencode
 module Ca = Maki_utils.Cache
@@ -86,7 +88,7 @@ let last_time_ f =
   let s = Unix.stat f in
   s.Unix.st_mtime
 
-(* number of threads to use in parallel for computing Sha1 *)
+(* number of threads to use in parallel for computing Sha *)
 let sha1_pool_ = Limit.create 20
 
 (* fast sha1 on a file *)
@@ -94,7 +96,7 @@ let sha1_exn f =
   Limit.acquire sha1_pool_
     (fun () ->
        Maki_log.logf 5 (fun k->k "compute sha1 of `%s`" f);
-       Lwt_preemptive.detach (fun () -> Sha1.file_fast f |> Sha1.to_hex) ())
+       Lwt_preemptive.detach (fun () -> Hash.file_fast f |> Hash.to_hex) ())
 
 let sha1 f =
   Lwt.catch
@@ -109,7 +111,7 @@ let abspath f =
   then Filename.concat (Sys.getcwd()) f
   else f
 
-let sha1_of_string s = Sha1.string s |> Sha1.to_hex
+let sha1_of_string s = Hash.string s |> Hash.to_hex
 
 let last_mtime f : time or_error =
   try Ok (last_time_ f)
@@ -527,7 +529,7 @@ module Ref = struct
       codec
       x =
     let data, children = Codec.encode codec x in
-    let key = Sha1.string data |> Sha1.to_hex in
+    let key = Hash.string data |> Hash.to_hex in
     let record = On_disk_record.make ?lifetime ~children key data in
     let record_s, _ = Codec.encode On_disk_record.codec record in
     Storage.set storage key record_s >>|= fun () ->
@@ -560,16 +562,16 @@ end
 (** {2 Arguments} *)
 module Arg = struct
   module Hash = struct
-    type 'a t = Sha1.ctx -> 'a -> unit
+    type 'a t = Hash.ctx -> 'a -> unit
 
     let hash (h:_ t) x =
-      let buf = Sha1.init() in
+      let buf = Hash.init() in
       h buf x;
-      Sha1.finalize buf
+      Hash.finalize buf
 
-    let hash_to_string h x = hash h x |> Sha1.to_hex
+    let hash_to_string h x = hash h x |> Hash.to_hex
 
-    let str_ ctx s = Sha1.update_string ctx s
+    let str_ ctx s = Hash.update_string ctx s
 
     let unit _ _ = ()
     let int ctx x = str_ ctx (string_of_int x)
@@ -746,10 +748,10 @@ end
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
 let compute_name (fun_name:string) (args:Arg.t list): hash =
-  let ctx = Sha1.init() in
-  Sha1.update_string ctx fun_name;
+  let ctx = Hash.init() in
+  Hash.update_string ctx fun_name;
   List.iter (fun (Arg.A(h,x)) -> h ctx x) args;
-  Sha1.finalize ctx |> Sha1.to_hex
+  Hash.finalize ctx |> Hash.to_hex
 
 (* map computation_name -> future (serialized) result *)
 type memo_table = (string, encoded_value lazy_t or_error Lwt.t) Hashtbl.t
