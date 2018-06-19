@@ -1,7 +1,21 @@
 
 (* This file is free software. See file "license" for more details. *)
 
-(** {1 On-Disk Storage} *)
+(** {1 Persistent Storage} *)
+
+(* TODO:
+   - optional interface for Memcached
+   - optional interface for LMDB
+   - optional interface for Sqlite
+   - optional interface to DHT
+   - composition of storages:
+     * like RAID1, duplicate writes, use first terminating read
+     * use one storage as a fast cache for the second storage (slower but
+       probably more comprehensive; e.g. memcached + DHT for distributed jobs)
+   - a dynlink based system for loading other storage systems
+   - some system for picking storage from CLI options
+*)
+
 
 open Result
 open Lwt.Infix

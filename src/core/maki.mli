@@ -110,13 +110,59 @@ module Codec : sig
       Unsafe, but useful for prototyping. *)
 end
 
-(** {2 On-Disk storage}
+(** {2 Persistent storage}
 
-    We use a generic interface for on-disk storage, in the form of a
+    We use a generic interface for persistent storage, in the form of a
     dictionary [string -> string]. The default storage just uses
     one file per pair. *)
 
-module Storage = Maki_storage
+module Storage : sig 
+  type t = {
+    name: string;
+    get: string -> string option or_error Lwt.t;
+    set: string -> string -> unit or_error Lwt.t;
+    remove: string -> unit Lwt.t;
+    fold: 'a. f:('a -> string * string -> 'a or_error Lwt.t) -> x:'a -> 'a or_error Lwt.t;
+    flush_cache: unit -> unit;
+  }
+
+  val name : t -> string
+  (** Informal description of the storage *)
+
+  val get : t -> string -> string option or_error Lwt.t
+  (** [get t k] obtains the value for [k] in [t] *)
+
+  val get_exn : t -> string -> string option Lwt.t
+
+  val set : t -> string -> string -> unit or_error Lwt.t
+  (** [set t k v] puts the pair [k -> v] in [t] *)
+
+  val set_exn : t -> string -> string -> unit Lwt.t
+
+  val remove : t -> string -> unit Lwt.t
+
+  val fold : t -> f:('a -> string * string -> 'a or_error Lwt.t) -> x:'a -> 'a or_error Lwt.t
+  (** [fold ~f ~x t] folds over all the pairs [key, value] in [t]. *)
+
+  val flush_cache : t -> unit
+  (** Flush in-process cache, if any *)
+
+  val none : t
+  (** A dummy storage which does not store any result, thus forcing
+      every computation to run. *)
+
+  val default : ?dir:path -> unit -> t Lwt.t
+  (** [default ?dir ()] creates a new default storage (one file per pair)
+      @param dir if provided, set the directory used for storing files
+        if [dir] is not set, then the current directory is used, unless the
+          environment variable "MAKI_DIR" is set
+      @raise Unix.Error in case of error, if it could not create [dir] properly *)
+
+  val set_default : t -> unit
+  (** Change the storage that is used to evaluate every Maki function *)
+
+  val get_default : unit -> t
+end
 
 (** {2 Time Utils} *)
 
@@ -435,4 +481,29 @@ val walk :
 
 (** {2 Logging} *)
 
-module Log = Maki_log
+module Log : sig
+  type logger = {
+    log: 'a.
+      int ->
+      ((('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a) -> unit) ->
+      unit
+  }
+
+  val log : int -> string -> unit
+
+  val logf :
+    int ->
+    ((('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a) -> unit) ->
+    unit
+  (** Log at the given level, using a {!Format}-ready message. This is
+      designed to be cheap if the message won't be printed because its
+      level is too high.
+      Use like this:
+      [logf 1 (fun k->k "hello %s, 42=%d" "world" (41+1))] *)
+
+  val default_logger : logger
+
+  val set_logger : logger -> unit
+
+  val set_level : int -> unit
+end
