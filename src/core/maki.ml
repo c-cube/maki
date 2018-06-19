@@ -219,8 +219,12 @@ module Codec = struct
   let marshal name =
     let flags = [Marshal.Closures; Marshal.No_sharing; Marshal.Compat_32] in
     make_leaf name
-      ~encode:(fun x -> Marshal.to_string x flags)
-      ~decode:(fun s -> Marshal.from_string s 0)
+      ~encode:(fun x -> Marshal.to_string (name,x) flags)
+      ~decode:(fun s ->
+        let name', x = Marshal.from_string s 0 in
+        if name=name' then x
+        else failwith (Format.asprintf "codec.marshal: mismatch (value is %S, expected %S)" name' name)
+      )
 
   let or_error (c:'a t): 'a or_error t =
     let name = c.descr ^ " or_error" in
