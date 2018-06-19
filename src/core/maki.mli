@@ -216,6 +216,12 @@ module Lifetime : sig
 
   val default : t
   (** Default lifetime for values *)
+
+  (** A few useful lifetimes *)
+  val short : t
+  val one_minute : t
+  val one_hour : t
+  val one_day : t
 end
 
 (** {2 Values Stored on Disk} *)
@@ -343,7 +349,120 @@ module Hash : sig
   (** Hashing by encoding, then hashing the encoded value *)
 end
 
-(** {2 Arguments of Memoized Functions} *)
+(** {2 Memoized Functions}
+
+    This is the heart of the library: a wrapper around {b pure} functions
+    from {!Arg} arguments to a {!Codec}-aware type. Such functions
+    are supposed to always return the same value given the same arguments
+    and dependencies (a typical dependency is an external program that
+    might have several version).
+
+    The {!call} function is used to actually evaluate a wrapped function,
+    or return its memoized result if the computation was done already.
+
+    We need to name functions because, from one execution to another,
+    the results of a function call must be stored on disk. Names are used
+    to map function calls to their result. If two different functions
+    share the same name (even across programs), the results will be
+    unpredictable.
+*)
+
+(** {3 High-Level API} *)
+
+module Fun : sig
+  type ('f,'f2,'ret) t
+
+  type 'f call_wrap =
+    ?bypass:bool ->
+    ?storage:Storage.t ->
+    ?lifetime:Lifetime.t ->
+    ?limit:Limit.t ->
+    ?tags:string list ->
+    'f
+end
+
+val return_ok : 'a -> 'a or_error Lwt.t
+val return_fail : string -> 'a or_error Lwt.t
+
+val mk1 :
+  ( name:string ->
+    'a Hash.t -> 'ret Codec.t ->
+    f:(('a -> 'ret or_error Lwt.t) as 'f) ->
+    'f) Fun.call_wrap
+(** [mk1 ~name h codec ~f] behaves like the unary function [f : 'a -> 'ret]
+    but uses the hash function [h] to hash arguments, and [codec] to
+    save/restore values from the cache when [f] has already been evaluated
+    on a given value.
+    @param name is used to distinguish calls to [f] from calls to other
+    functions that have the same signature.
+
+    Example: memoizing a recursive function:
+{[
+let fib =
+  let rec fib = lazy Maki.(
+      mk1 ~name:"fib" Hash.int Codec.int ~lifetime:Lifetime.one_minute
+        ~f:(fun x -> if x <= 1
+          then return_ok 1
+          else E.(Lazy.force fib (x-1) >>= fun x1 ->
+              Lazy.force fib (x-2) >|= fun x2 -> x1+x2))
+    ) in
+  Lazy.force fib;;
+
+fib 42 ;;
+(* returns [Ok 42] *)
+]}
+
+*)
+
+val mk2 :
+  ( name:string ->
+    'a Hash.t -> 'b Hash.t -> 'ret Codec.t ->
+    f:(('a -> 'b -> 'ret or_error Lwt.t) as 'f) ->
+    'f) Fun.call_wrap
+(** Binary version of {!mk1}
+
+Example: memoized concatenation of two files :
+{[
+open Lwt.Infix;;
+
+let concat =
+  Maki.(mk2 ~name:"concat" Hash.file_ref Hash.file_ref Codec.string ~lifetime:Lifetime.one_hour
+    ~f:(fun f1 f2 ->
+      let open E in
+      read_file f1 >>= fun content1 ->
+      read_file f2 >>= fun content2 ->
+      return_ok (content1 ^ content2)))
+;;
+
+let x1 = Maki.(File_ref.make_exn "foo1" >>= fun f1 -> File_ref.make_exn "foo2" >>= concat f1);;
+
+(* cached *)
+let x2 = Maki.(File_ref.make_exn "foo1" >>= fun f1 -> File_ref.make_exn "foo2" >>= concat f1);;
+
+(* now change contnet of file "foo1", so this should change too *)
+let x3 = Maki.(File_ref.make_exn "foo1" >>= fun f1 -> File_ref.make_exn "foo2" >>= concat f1);;
+
+*)
+
+val mk3 :
+  ( name:string ->
+    'a Hash.t -> 'b Hash.t -> 'c Hash.t -> 'ret Codec.t ->
+    f:(('a -> 'b -> 'c -> 'ret or_error Lwt.t) as 'f) ->
+    'f) Fun.call_wrap
+
+val mk4 :
+  ( name:string ->
+    'a Hash.t -> 'b Hash.t -> 'c Hash.t -> 'd Hash.t -> 'ret Codec.t ->
+    f:(('a -> 'b -> 'c -> 'd -> 'ret or_error Lwt.t) as 'f) ->
+    'f) Fun.call_wrap
+
+val mk5 :
+  ( name:string ->
+    'a Hash.t -> 'b Hash.t -> 'c Hash.t -> 'd Hash.t -> 'e Hash.t -> 'ret Codec.t ->
+    f:(('a -> 'b -> 'c -> 'd -> 'e -> 'ret or_error Lwt.t) as 'f) ->
+    'f) Fun.call_wrap
+
+(** {3 Low-Level API} *)
 
 (** To memoize a function, Maki must be able to hash the function's input
     arguments. Arguments that hash to the same value are considered
@@ -360,7 +479,6 @@ end
     ]}
 *)
 module Arg : sig
-
   type t = A : 'a Hash.t * 'a -> t
   (** A pair of a value (in case we need to compute) and a hash
       function (to check whether a result is computed already).
@@ -377,24 +495,6 @@ module Arg : sig
   end
   include module type of Infix
 end
-
-(** {2 Memoized Functions}
-
-    This is the heart of the library: a wrapper around {b pure} functions
-    from {!Value} arguments to a {!Value}-aware type. Such functions
-    are supposed to always return the same value given the same arguments
-    and dependencies (a typical dependency is an external program that
-    might have several version).
-
-    The {!call} function is used to actually evaluate a wrapped function,
-    or return its memoized result if the computation was done already.
-
-    We need to name functions because, from one execution to another,
-    the results of a function call must be stored on disk. Names are used
-    to map function calls to their result. If two different functions
-    share the same name (even across programs), the results will be
-    unpredictable.
-*)
 
 val call :
   ?bypass:bool ->
@@ -502,6 +602,9 @@ val shellf :
   ('a, Format.formatter, unit, (string * string * int) or_error Lwt.t) format4
   -> 'a
 (** Same as {!shell} but with a format string. Careful with escaping! *)
+
+val read_file : File_ref.t -> string or_error Lwt.t
+(** Read the content of the file *)
 
 val walk :
   ?filter:(path -> bool) ->

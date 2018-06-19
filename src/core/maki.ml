@@ -90,6 +90,7 @@ type encoded_value = string
 
 (** {2 Utils} *)
 
+(* last time file [f] was modified *)
 let last_time_ f =
   let s = Unix.stat f in
   s.Unix.st_mtime
@@ -294,23 +295,25 @@ end = struct
     Codec.make_leaf_bencode ~encode:to_bencode ~decode:of_bencode "file_stat"
 
   (* cache for files: maps file name to hash + last modif *)
-  type file_cache = (path, t or_error Lwt.t) Ca.t
+  type file_cache = (path, time * t or_error Lwt.t) Ca.t
 
   let file_cache_ : file_cache = Ca.replacing 512
 
   let make f : t or_error Lwt.t =
     if not (Sys.file_exists f) then (
       errorf "file `%s` not found" f |> Lwt.return
-    ) else begin match Ca.get file_cache_ f with
-      | Some fs -> fs (* cache hit *)
-      | None ->
+    ) else (
+      let last = last_time_ f in
+      match Ca.get file_cache_ f with
+      | Some (time,fs) when time >= last -> fs (* cache hit *)
+      | _ ->
         let fut =
           sha1 f >>|= fun f_hash ->
           { f_path=f; f_hash;}
         in
-        Ca.set file_cache_ f fut;
+        Ca.set file_cache_ f (last,fut);
         fut
-    end
+    )
 
   let make_exn f : _ Lwt.t =
     make f >>= function
@@ -405,6 +408,11 @@ module Lifetime = struct
   let can_drop = CanDrop
   let keep_for t = KeepFor t
   let keep_until t = KeepUntil t
+
+  let short = keep_for (Time.minutes 10)
+  let one_minute = keep_for (Time.minutes 1)
+  let one_hour = keep_for (Time.hours 1)
+  let one_day = keep_for (Time.days 1)
 
   let pp out = function
     | Keep -> Format.pp_print_string out "keep"
@@ -905,6 +913,65 @@ let call_pure ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning f =
   call ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning
     (fun () -> f () >|= Res_.return)
 
+module Fun = struct
+  type (_, _, _) t =
+    | Fun : 'a Hash.t * ('f, 'f2, 'ret) t -> ('a -> 'f, 'f2, 'ret) t
+    | Ret : string * 'a Codec.t ->
+      ('a or_error Lwt.t,
+       ((unit -> 'a or_error Lwt.t) -> string -> Arg.t list -> 'a Codec.t -> 'a or_error Lwt.t),
+       'a) t
+
+  let returning ~name c = Ret (name,c)
+  let (@->) h f = Fun (h,f)
+
+  type 'f call_wrap =
+    ?bypass:bool ->
+    ?storage:Storage.t ->
+    ?lifetime:Lifetime.t ->
+    ?limit:Limit.t ->
+    ?tags:string list ->
+    'f
+
+  let call : type f1 f2 ret. ((f1, f2, ret) t -> f1 -> f1) call_wrap =
+    fun ?bypass ?storage ?lifetime ?limit ?tags def f ->
+      let rec pass_args
+        : type g1 g2 ret. Arg.t list -> (g1, g2, ret) t -> (unit -> g1) -> g1
+        = fun args def f -> match def with
+          | Ret (name,codec) ->
+            let args = List.rev args in
+            call ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning:codec f
+          | Fun (h, sub_def) ->
+            (fun x ->
+               let f () = f () x in
+               let a = Arg.make h x in
+               pass_args (a::args) sub_def f)
+      in
+      pass_args [] def (fun () -> f)
+end
+
+let return_ok x = E.return x
+let return_fail s = E.fail s
+
+let mk1 ?bypass ?storage ?lifetime ?limit ?tags ~name h1 ret ~f =
+  let open Fun in
+  call ?bypass ?storage ?lifetime ?limit ?tags (h1 @-> returning ~name ret) f
+
+let mk2 ?bypass ?storage ?lifetime ?limit ?tags ~name h1 h2 ret ~f =
+  let open Fun in
+  call ?bypass ?storage ?lifetime ?limit ?tags (h1 @-> h2 @-> returning ~name ret) f
+
+let mk3 ?bypass ?storage ?lifetime ?limit ?tags ~name h1 h2 h3 ret ~f =
+  let open Fun in
+  call ?bypass ?storage ?lifetime ?limit ?tags (h1 @-> h2 @-> h3 @-> returning ~name ret) f
+
+let mk4 ?bypass ?storage ?lifetime ?limit ?tags ~name h1 h2 h3 h4 ret ~f =
+  let open Fun in
+  call ?bypass ?storage ?lifetime ?limit ?tags (h1 @-> h2 @-> h3 @-> h4 @-> returning ~name ret) f
+
+let mk5 ?bypass ?storage ?lifetime ?limit ?tags ~name h1 h2 h3 h4 h5 ret ~f =
+  let open Fun in
+  call ?bypass ?storage ?lifetime ?limit ?tags (h1 @-> h2 @-> h3 @-> h4 @-> h5 @-> returning ~name ret) f
+
 (** {2 GC} *)
 
 module GC = struct
@@ -989,6 +1056,15 @@ module GC = struct
         Lwt.return (Ok stats)
     end
 end
+
+let read_file (f:File_ref.t) : string or_error Lwt.t =
+  let s = File_ref.path f in
+  Lwt.catch
+    (fun () ->
+       Lwt_io.with_file ~mode:Lwt_io.Input s
+         (fun ic -> Lwt_io.read ic |> E.lift_ok))
+    (fun e ->
+       E.fail (Printexc.to_string e))
 
 let walk
     ?(filter=fun _ -> true)

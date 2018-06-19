@@ -3,6 +3,7 @@
 
 (** {1 Various Utils} *)
 
+open Result
 open Lwt.Infix
 
 type 'a or_error = ('a, string) Result.result

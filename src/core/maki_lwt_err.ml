@@ -17,12 +17,15 @@ let unwrap_res = function
   | Ok x -> Lwt.return x
   | Error e -> Lwt.fail e
 
+let lift_ok m = Lwt.(m >|= fun x -> Ok x)
+
+let lift_err m = Lwt.(m >|= fun x -> Error x)
+
 let (>>=) x f =
   Lwt.bind x
     (function
       | Error msg -> fail msg
-      | Ok y -> f y
-    )
+      | Ok y -> f y)
 
 let (>|=) x f =
   Lwt.map
