@@ -14,7 +14,7 @@ and fib_memo n =
     ~lifetime:(`KeepFor (Maki.Time.minutes 20))
     ~name:"fib"
     ~returning:Maki.Codec.int
-    ~args:Maki.Arg.([Hash.int @:: n])
+    ~args:Maki.Arg.([Maki.Hash.int @:: n])
     (fun () -> fib n)
 
 let main n =
@@ -27,6 +27,6 @@ let () =
   let n = ref 20 in
   Arg.parse
     [ "-n", Arg.Set_int n, " set number (default 20)"
-    ; "--debug", Arg.Int Maki_log.set_level, " set debug level"
+    ; "--debug", Arg.Int Maki.Log.set_level, " set debug level"
     ] (fun _ -> failwith "no arguments") "usage: test_fib";
   Lwt_main.run (main !n)
