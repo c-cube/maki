@@ -35,10 +35,19 @@ module E : sig
   val return : 'a -> 'a t
   val return_unit : unit t
   val fail : string -> _ t
+  val lift_ok : 'a Lwt.t -> 'a t
+  val lift_err : string Lwt.t -> 'a t
   val unwrap_res : ('a, exn) Result.result -> 'a Lwt.t
-  val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
-  val ( >|= ) : 'a t -> ('a -> 'b) -> 'b t
+  module Infix : sig
+    val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+    val ( >|= ) : 'a t -> ('a -> 'b) -> 'b t
+    val ( <*> ) : ('a -> 'b) t -> 'a t -> 'b t
+    val ( <$> ) : ('a -> 'b) -> 'a t -> 'b t
+  end
+  include module type of Infix
 end
+
+include module type of E.Infix
 
 (** {2 Controlling Parallelism} *)
 
@@ -403,7 +412,7 @@ let fib =
       mk1 ~name:"fib" Hash.int Codec.int ~lifetime:Lifetime.one_minute
         ~f:(fun x -> if x <= 1
           then return_ok 1
-          else E.(Lazy.force fib (x-1) >>= fun x1 ->
+          else (Lazy.force fib (x-1) >>= fun x1 ->
               Lazy.force fib (x-2) >|= fun x2 -> x1+x2))
     ) in
   Lazy.force fib;;
@@ -434,13 +443,13 @@ let concat =
       return_ok (content1 ^ content2)))
 ;;
 
-let x1 = Maki.(File_ref.make_exn "foo1" >>= fun f1 -> File_ref.make_exn "foo2" >>= concat f1);;
+let x1 = Maki.(File_ref.make "foo1" >>= fun f1 -> File_ref.make "foo2" >>= concat f1);;
 
 (* cached *)
-let x2 = Maki.(File_ref.make_exn "foo1" >>= fun f1 -> File_ref.make_exn "foo2" >>= concat f1);;
+let x2 = Maki.(File_ref.make "foo1" >>= fun f1 -> File_ref.make "foo2" >>= concat f1);;
 
 (* now change contnet of file "foo1", so this should change too *)
-let x3 = Maki.(File_ref.make_exn "foo1" >>= fun f1 -> File_ref.make_exn "foo2" >>= concat f1);;
+let x3 = Maki.(File_ref.make "foo1" >>= fun f1 -> File_ref.make "foo2" >>= concat f1);;
 
 *)
 

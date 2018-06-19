@@ -1100,3 +1100,5 @@ let walk
   in
   try walk ~rec_:true [] dir |> E.return
   with e -> E.fail (Printexc.to_string e)
+
+include E.Infix
