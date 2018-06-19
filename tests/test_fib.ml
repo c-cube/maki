@@ -11,7 +11,7 @@ let rec fib n =
 
 and fib_memo n =
   Maki.call
-    ~lifetime:(`KeepFor (Maki.Time.minutes 20))
+    ~lifetime:(Maki.Lifetime.KeepFor (Maki.Time.minutes 20))
     ~name:"fib"
     ~returning:Maki.Codec.int
     ~args:Maki.Arg.([Maki.Hash.int @:: n])
