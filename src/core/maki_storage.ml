@@ -26,6 +26,8 @@ type path = string
 let error = Maki_utils.error
 let errorf = Maki_utils.errorf
 
+module E = Maki_lwt_err
+
 type t = {
   name: string;
   get: string -> string option or_error Lwt.t;
@@ -186,3 +188,4 @@ let storage_ = ref (lazy (default_ ()))
 let set_default s = storage_ := Lazy.from_val s
 let get_default () = Lazy.force !storage_
 
+let to_list st = fold ~x:[] ~f:(fun acc pair -> E.return @@ pair::acc) st

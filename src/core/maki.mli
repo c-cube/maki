@@ -161,6 +161,9 @@ module Storage : sig
   val fold : t -> f:('a -> string * string -> 'a or_error Lwt.t) -> x:'a -> 'a or_error Lwt.t
   (** [fold ~f ~x t] folds over all the pairs [key, value] in [t]. *)
 
+  val to_list : t -> (string * string) list or_error Lwt.t
+  (** Get all bindings in this storage *)
+
   val flush_cache : t -> unit
   (** Flush in-process cache, if any *)
 
