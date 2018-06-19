@@ -17,7 +17,7 @@ let decode_json s =
   with e ->
     Maki.errorf "expected json, got `%s`: %s" s (Printexc.to_string e)
 
-let hash ctx j = Maki.Arg.Hash.string ctx (Yojson.Safe.to_string j)
+let hash ctx j = Maki.Hash.string ctx (Yojson.Safe.to_string j)
 
 let codec =
   Maki.Codec.make_leaf "json"

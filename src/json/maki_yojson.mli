@@ -8,10 +8,11 @@ type 'a or_error = 'a Maki.or_error
 (** Yojson.Safe *)
 type json = Yojson.Safe.json
 
-val hash : json Maki.Arg.Hash.t
+val hash : json Maki.Hash.t
 (** Taking json as hash *)
 
 val codec : json Maki.Codec.t
+(** Encoding/Decoding json to strings *)
 
 val make :
   to_yojson:('a -> json) ->

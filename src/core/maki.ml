@@ -9,7 +9,7 @@ open Lwt.Infix
 module Util = Maki_utils
 module Log = Maki_log
 
-module Hash = Sha1 
+module Sha = Sha1 
 
 module B = Bencode
 module BM = Maki_bencode
@@ -96,7 +96,7 @@ let sha1_exn f =
   Limit.acquire sha1_pool_
     (fun () ->
        Maki_log.logf 5 (fun k->k "compute sha1 of `%s`" f);
-       Lwt_preemptive.detach (fun () -> Hash.file_fast f |> Hash.to_hex) ())
+       Lwt_preemptive.detach (fun () -> Sha.file_fast f |> Sha.to_hex) ())
 
 let sha1 f =
   Lwt.catch
@@ -111,7 +111,7 @@ let abspath f =
   then Filename.concat (Sys.getcwd()) f
   else f
 
-let sha1_of_string s = Hash.string s |> Hash.to_hex
+let sha1_of_string s = Sha.string s |> Sha.to_hex
 
 let last_mtime f : time or_error =
   try Ok (last_time_ f)
@@ -246,7 +246,8 @@ module File_ref : sig
   val hash : t -> hash
   val to_string : t -> string
 
-  val compute : path -> t or_error Lwt.t
+  val make : path -> t or_error Lwt.t
+  val make_exn : path -> t Lwt.t
   val is_valid : t -> bool Lwt.t
 
   val of_bencode : Bencode.t -> t or_error
@@ -287,7 +288,7 @@ end = struct
 
   let file_cache_ : file_cache = Ca.replacing 512
 
-  let compute f : t or_error Lwt.t =
+  let make f : t or_error Lwt.t =
     if not (Sys.file_exists f) then (
       errorf "file `%s` not found" f |> Lwt.return
     ) else begin match Ca.get file_cache_ f with
@@ -301,12 +302,17 @@ end = struct
         fut
     end
 
+  let make_exn f : _ Lwt.t =
+    make f >>= function
+    | Ok x -> Lwt.return x
+    | Error e -> Lwt.fail (Invalid_argument e)
+
   (* check if [f] is a [file_state] that doesn't correspond to the actual
      content of the disk *)
   let is_valid (f:t): bool Lwt.t =
     Maki_log.logf 5 (fun k->k "check if file %s is up-to-date..." (to_string f));
     (* compare [fs] with actual current file state *)
-    compute (path f) >>= fun res ->
+    make (path f) >>= fun res ->
     begin match res with
       | Error _ -> Lwt.return_true (* file not present, etc. *)
       | Ok f' ->
@@ -359,7 +365,7 @@ end = struct
         fut
     else Lwt.return (Ok f)
 
-  let make (f:path) = find f >>>= File_ref.compute
+  let make (f:path) = find f >>>= File_ref.make
 
   let to_string = File_ref.to_string
 end
@@ -529,7 +535,7 @@ module Ref = struct
       codec
       x =
     let data, children = Codec.encode codec x in
-    let key = Hash.string data |> Hash.to_hex in
+    let key = Sha.string data |> Sha.to_hex in
     let record = On_disk_record.make ?lifetime ~children key data in
     let record_s, _ = Codec.encode On_disk_record.codec record in
     Storage.set storage key record_s >>|= fun () ->
@@ -559,71 +565,73 @@ module Ref = struct
     end |> Lwt.return
 end
 
+module Hash = struct
+  module Sha = Sha
+  type 'a t = Sha.ctx -> 'a -> unit
+
+  let hash (h:_ t) x =
+    let buf = Sha.init() in
+    h buf x;
+    Sha.finalize buf
+
+  let hash_to_string h x = hash h x |> Sha.to_hex
+
+  let str_ ctx s = Sha.update_string ctx s
+
+  let unit _ _ = ()
+  let int ctx x = str_ ctx (string_of_int x)
+  let bool ctx x = str_ ctx (string_of_bool x)
+  let float ctx x = str_ ctx (string_of_float x)
+  let string ctx x = str_ ctx x
+
+  let map f h ctx x = h ctx (f x)
+
+  let list h ctx l = List.iter (h ctx) l
+  let array h ctx a = list h ctx (Array.to_list a)
+
+  let file_ref ctx (f:File_ref.t) =
+    let h = File_ref.hash f in
+    str_ ctx (File_ref.path f);
+    str_ ctx h
+
+  let program_ref ctx (p:Program_ref.t) =
+    let h = Program_ref.as_file p in
+    file_ref ctx h
+
+  let pair h1 h2 ctx (x1,x2) =
+    h1 ctx x1;
+    h2 ctx x2
+
+  let triple h1 h2 h3 ctx (x1,x2,x3) =
+    h1 ctx x1;
+    h2 ctx x2;
+    h3 ctx x3
+
+  let quad h1 h2 h3 h4 ctx (x1,x2,x3,x4) =
+    h1 ctx x1;
+    h2 ctx x2;
+    h3 ctx x3;
+    h4 ctx x4
+
+  (* set: orderless. We compute all hashes, sort, then hash the resulting list *)
+  let set h ctx l =
+    begin
+      List.map (fun x -> hash_to_string h x) l
+      |> List.sort String.compare
+      |> List.iter (str_ ctx)
+    end
+
+  let marshal: 'a t = fun ctx x ->
+    str_ ctx (Marshal.to_string x [Marshal.Closures])
+
+  let of_codec (c:'a Codec.t): 'a t =
+    fun ctx x ->
+      let s, _ = Codec.encode c x in
+      string ctx s
+end
+
 (** {2 Arguments} *)
 module Arg = struct
-  module Hash = struct
-    type 'a t = Hash.ctx -> 'a -> unit
-
-    let hash (h:_ t) x =
-      let buf = Hash.init() in
-      h buf x;
-      Hash.finalize buf
-
-    let hash_to_string h x = hash h x |> Hash.to_hex
-
-    let str_ ctx s = Hash.update_string ctx s
-
-    let unit _ _ = ()
-    let int ctx x = str_ ctx (string_of_int x)
-    let bool ctx x = str_ ctx (string_of_bool x)
-    let float ctx x = str_ ctx (string_of_float x)
-    let string ctx x = str_ ctx x
-
-    let map f h ctx x = h ctx (f x)
-
-    let list h ctx l = List.iter (h ctx) l
-    let array h ctx a = list h ctx (Array.to_list a)
-
-    let file_ref ctx (f:File_ref.t) =
-      let h = File_ref.hash f in
-      str_ ctx (File_ref.path f);
-      str_ ctx h
-
-    let program_ref ctx (p:Program_ref.t) =
-      let h = Program_ref.as_file p in
-      file_ref ctx h
-
-    let pair h1 h2 ctx (x1,x2) =
-      h1 ctx x1;
-      h2 ctx x2
-
-    let triple h1 h2 h3 ctx (x1,x2,x3) =
-      h1 ctx x1;
-      h2 ctx x2;
-      h3 ctx x3
-
-    let quad h1 h2 h3 h4 ctx (x1,x2,x3,x4) =
-      h1 ctx x1;
-      h2 ctx x2;
-      h3 ctx x3;
-      h4 ctx x4
-
-    (* set: orderless. We compute all hashes, sort, then hash the resulting list *)
-    let set h ctx l =
-      begin
-        List.map (fun x -> hash_to_string h x) l
-        |> List.sort String.compare
-        |> List.iter (str_ ctx)
-      end
-
-    let marshal: 'a t = fun ctx x ->
-      str_ ctx (Marshal.to_string x [Marshal.Closures])
-
-    let of_codec (c:'a Codec.t): 'a t =
-      fun ctx x ->
-        let s, _ = Codec.encode c x in
-        string ctx s
-  end
 
   type t = A : 'a Hash.t * 'a -> t
 
@@ -748,10 +756,10 @@ end
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
 let compute_name (fun_name:string) (args:Arg.t list): hash =
-  let ctx = Hash.init() in
-  Hash.update_string ctx fun_name;
+  let ctx = Sha.init() in
+  Sha.update_string ctx fun_name;
   List.iter (fun (Arg.A(h,x)) -> h ctx x) args;
-  Hash.finalize ctx |> Hash.to_hex
+  Sha.finalize ctx |> Sha.to_hex
 
 (* map computation_name -> future (serialized) result *)
 type memo_table = (string, encoded_value lazy_t or_error Lwt.t) Hashtbl.t

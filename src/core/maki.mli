@@ -39,12 +39,6 @@ module E : sig
   val ( >|= ) : 'a t -> ('a -> 'b) -> 'b t
 end
 
-(** {2 Hash function}
-
-    A cryptographic hash function used to map objects to (probably) unique keys *)
-
-module Hash : module type of Sha1
-
 (** {2 Controlling Parallelism} *)
 
 module Limit : sig
@@ -194,7 +188,7 @@ type lifetime =
 val default_lifetime : lifetime
 (** Default lifetime for values *)
 
-(** {2 Value Stored on Disk} *)
+(** {2 Values Stored on Disk} *)
 
 module File_ref : sig
   type t
@@ -208,8 +202,11 @@ module File_ref : sig
 
   val to_string : t -> string
 
-  val compute : path -> t or_error Lwt.t
+  val make : path -> t or_error Lwt.t
   (** Make a file ref out of a simple path *)
+
+  val make_exn : path -> t Lwt.t
+  (** @raise Invalid_argument if the path is not valid *)
 
   val is_valid : t -> bool Lwt.t
   (** Check if the reference is up-to-date (i.e. the file content
@@ -266,6 +263,56 @@ module Ref : sig
       stored, and decodes it. *)
 end
 
+(** {2 Hash function}
+
+    A cryptographic hash function used to map objects to (probably) unique keys *)
+
+module Hash : sig
+  module Sha : module type of Sha1
+
+  type 'a t = Sha.ctx -> 'a -> unit
+
+  val unit : unit t
+  val int : int t
+  val bool: bool t
+  val string : string t
+  val float : float t
+  val list : 'a t -> 'a list t
+  val array : 'a t -> 'a array t
+
+  val map : ('a -> 'b) -> 'b t -> 'a t
+  (** [map f hash x] encodes [x] using [f], and then uses [hash]
+      to hash [f x]. *)
+
+  val file_ref : File_ref.t t
+  (** How to hash a file ref *)
+
+  val program_ref : Program_ref.t t
+  (** How to hash a program ref *)
+
+  val set : 'a t -> 'a list t
+  (** [set op] is similar to {!list}, except the order of elements does
+      not matter. *)
+
+  val marshal : 'a t
+  (** Encode the data into a string using marshal, then hash
+      the string.
+      Caution, this is somewhat unsafe, but useful for quick-and-dirty work. *)
+
+  val pair : 'a t -> 'b t -> ('a * 'b) t
+  val triple : 'a t -> 'b t -> 'c t -> ('a * 'b * 'c) t
+  val quad : 'a t -> 'b t -> 'c t -> 'd t -> ('a * 'b * 'c * 'd) t
+
+  val hash : 'a t -> 'a -> Sha.t
+  (** Hash a value. *)
+
+  val hash_to_string : 'a t -> 'a -> string
+  (** Hash a value, then encode the hash into a string. *)
+
+  val of_codec : 'a Codec.t -> 'a t
+  (** Hashing by encoding, then hashing the encoded value *)
+end
+
 (** {2 Arguments of Memoized Functions} *)
 
 (** To memoize a function, Maki must be able to hash the function's input
@@ -283,49 +330,6 @@ end
     ]}
 *)
 module Arg : sig
-  module Hash : sig
-    type 'a t = Sha1.ctx -> 'a -> unit
-
-    val unit : unit t
-    val int : int t
-    val bool: bool t
-    val string : string t
-    val float : float t
-    val list : 'a t -> 'a list t
-    val array : 'a t -> 'a array t
-
-    val map : ('a -> 'b) -> 'b t -> 'a t
-    (** [map f hash x] encodes [x] using [f], and then uses [hash]
-        to hash [f x]. *)
-
-    val file_ref : File_ref.t t
-    (** How to hash a file ref *)
-
-    val program_ref : Program_ref.t t
-    (** How to hash a program ref *)
-
-    val set : 'a t -> 'a list t
-    (** [set op] is similar to {!list}, except the order of elements does
-        not matter. *)
-
-    val marshal : 'a t
-    (** Encode the data into a string using marshal, then hash
-        the string.
-        Caution, this is somewhat unsafe, but useful for quick-and-dirty work. *)
-
-    val pair : 'a t -> 'b t -> ('a * 'b) t
-    val triple : 'a t -> 'b t -> 'c t -> ('a * 'b * 'c) t
-    val quad : 'a t -> 'b t -> 'c t -> 'd t -> ('a * 'b * 'c * 'd) t
-
-    val hash : 'a t -> 'a -> Sha1.t
-    (** Hash a value. *)
-
-    val hash_to_string : 'a t -> 'a -> string
-    (** Hash a value, then encode the hash into a string. *)
-
-    val of_codec : 'a Codec.t -> 'a t
-    (** Hashing by encoding, then hashing the encoded value *)
-  end
 
   type t = A : 'a Hash.t * 'a -> t
   (** A pair of a value (in case we need to compute) and a hash
