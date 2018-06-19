@@ -9,7 +9,7 @@ open Lwt.Infix
 module Util = Maki_utils
 module Log = Maki_log
 
-module Sha = Sha1 
+module Sha = Sha1
 
 module B = Bencode
 module BM = Maki_bencode

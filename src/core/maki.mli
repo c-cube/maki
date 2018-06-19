@@ -129,7 +129,7 @@ end
     dictionary [string -> string]. The default storage just uses
     one file per pair. *)
 
-module Storage : sig 
+module Storage : sig
   type t = {
     name: string;
     get: string -> string option or_error Lwt.t;
@@ -347,7 +347,7 @@ module Arg : sig
   type t = A : 'a Hash.t * 'a -> t
   (** A pair of a value (in case we need to compute) and a hash
       function (to check whether a result is computed already).
-  
+
       Typically one would use {!@::}:
 
       - {[  int @:: 42 ]}
