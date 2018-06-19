@@ -46,13 +46,13 @@ let flush_cache t = t.flush_cache ()
 
 let get_exn t k =
   t.get k >>= function
-    | Ok x -> Lwt.return x
-    | Error e -> Lwt.fail (Failure e)
+  | Ok x -> Lwt.return x
+  | Error e -> Lwt.fail (Failure e)
 
 let set_exn t k v =
   t.set k v >>= function
-    | Ok () -> Lwt.return_unit
-    | Error e -> Lwt.fail (Failure e)
+  | Ok () -> Lwt.return_unit
+  | Error e -> Lwt.fail (Failure e)
 
 module Default = struct
   type t = {
@@ -71,12 +71,12 @@ module Default = struct
     with Not_found ->
       Lwt.catch
         (fun () ->
-          let f = k_to_file t k in
-          if Sys.file_exists f
-          then read_file_ f >|= fun x -> Ok (Some x)
-          else Lwt.return (Ok None))
+           let f = k_to_file t k in
+           if Sys.file_exists f
+           then read_file_ f >|= fun x -> Ok (Some x)
+           else Lwt.return (Ok None))
         (fun e ->
-          Lwt.return (Error (Printexc.to_string e)))
+           Lwt.return (Error (Printexc.to_string e)))
       >|= fun res ->
       Hashtbl.add t.cache k res;
       res
@@ -86,16 +86,16 @@ module Default = struct
   let set_ t k v =
     Lwt.catch
       (fun () ->
-        let f = k_to_file t k in
-        Lwt_io.with_file f
-          ~mode:Lwt_io.output ~flags:[Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
-          ~perm:0o644
-          (fun oc ->
-            (* invalidate cache *)
-            Hashtbl.replace t.cache k (Ok(Some v));
-            Lwt_io.write oc v >>= fun () ->
-            Lwt_io.flush oc)
-        >|= fun () -> Ok ()
+         let f = k_to_file t k in
+         Lwt_io.with_file f
+           ~mode:Lwt_io.output ~flags:[Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
+           ~perm:0o644
+           (fun oc ->
+              (* invalidate cache *)
+              Hashtbl.replace t.cache k (Ok(Some v));
+              Lwt_io.write oc v >>= fun () ->
+              Lwt_io.flush oc)
+         >|= fun () -> Ok ()
       )
       (fun e ->
          errorf "storage: error when writing `%s`: %s" k (Printexc.to_string e)

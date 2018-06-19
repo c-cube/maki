@@ -272,8 +272,8 @@ module Ref : sig
     ?storage:Maki_storage.t ->
     'a t ->
     'a option or_error Lwt.t
-  (** [get codec h] fetches the value whose hash is [h], if it is
-      stored, and decodes it. *)
+    (** [get codec h] fetches the value whose hash is [h], if it is
+        stored, and decodes it. *)
 end
 
 (** {2 Hash function}
@@ -507,7 +507,7 @@ val walk :
 module Log : sig
   type logger = {
     log: 'a.
-      int ->
+        int ->
       ((('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a) -> unit) ->
       unit
   }

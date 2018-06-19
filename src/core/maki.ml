@@ -46,8 +46,8 @@ module Res_ = struct
     try
       let res =
         List.map
-        (fun x -> match f x with Ok y -> y | Error e -> raise (Exit_map e))
-        l
+          (fun x -> match f x with Ok y -> y | Error e -> raise (Exit_map e))
+          l
       in
       Ok res
     with Exit_map msg -> Error msg
@@ -686,10 +686,10 @@ end = struct
   (* serialize [c] into Bencode *)
   let encode c =
     let b = B.Dict
-      [ "name", BM.mk_str (computation_name c);
-        "ref", BM.mk_str (result c |> Ref.hash);
-        "tags", BM.mk_list (List.map BM.mk_str (tags c));
-      ] in
+        [ "name", BM.mk_str (computation_name c);
+          "ref", BM.mk_str (result c |> Ref.hash);
+          "tags", BM.mk_list (List.map BM.mk_str (tags c));
+        ] in
     b, children c
 
   (* [s] is a serialized result, turn it into a result *)
@@ -942,23 +942,23 @@ module GC = struct
     Hashtbl.iter
       (fun k c ->
          match c.gc_status with
-           | (`Alive | `Root) when not force ->
-             Maki_log.logf 5 (fun f->f "gc: keep value %s" k);
-             if c.gc_status = `Root then incr n_roots;
-             incr n_kept
-           | _ ->
-             Maki_log.logf 5 (fun f->f "gc: remove value %s" k);
-             Lwt.async
-               (fun () ->
-                  Lwt.catch
-                    (fun () ->
-                       incr n_removed;
-                       Storage.remove s k)
-                    (fun e ->
-                       err :=
-                         Some (errorf "error when removing `%s`: %s"
-                             k (Printexc.to_string e));
-                       Lwt.return_unit)))
+         | (`Alive | `Root) when not force ->
+           Maki_log.logf 5 (fun f->f "gc: keep value %s" k);
+           if c.gc_status = `Root then incr n_roots;
+           incr n_kept
+         | _ ->
+           Maki_log.logf 5 (fun f->f "gc: remove value %s" k);
+           Lwt.async
+             (fun () ->
+                Lwt.catch
+                  (fun () ->
+                     incr n_removed;
+                     Storage.remove s k)
+                  (fun e ->
+                     err :=
+                       Some (errorf "error when removing `%s`: %s"
+                           k (Printexc.to_string e));
+                     Lwt.return_unit)))
       st;
     begin match !err with
       | Some e -> Lwt.return e

@@ -5,7 +5,7 @@
 
 type logger = {
   log: 'a.
-    int ->
+      int ->
     ((('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a) -> unit) ->
     unit
 }
@@ -24,10 +24,10 @@ let default_logger = {
       then (
         f
           (fun fmt ->
-            Format.kfprintf
-              (fun _ -> ())
-              debug_fmt_
-              ("@[<2>maki[%.3f]:@ " ^^ fmt ^^ "@]@.") (Unix.gettimeofday()-.start))
+             Format.kfprintf
+               (fun _ -> ())
+               debug_fmt_
+               ("@[<2>maki[%.3f]:@ " ^^ fmt ^^ "@]@.") (Unix.gettimeofday()-.start))
       )
   )
 }

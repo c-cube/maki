@@ -13,6 +13,9 @@ doc:
 clean:
 	jbuilder clean
 
+reindent:
+	find -name '*.ml*' -exec ocp-indent -i {} \;
+
 .PHONY: all build test clean doc
 
 upload-doc: doc

@@ -256,11 +256,11 @@ let find_field ?or_ what f l =
         | A.S_field (f', A.F_set p) when f=f' -> Some p
         | _ -> None) l
   with
+  | Some x -> x
+  | None ->
+    match or_ with
+    | None -> failf "building `%s`: could not find \"%s\"" what f l
     | Some x -> x
-    | None ->
-      match or_ with
-        | None -> failf "building `%s`: could not find \"%s\"" what f l
-        | Some x -> x
 
 let build_oasis_lib name l =
   let path = find_field name "Path" l |> String.concat "" in
@@ -291,11 +291,11 @@ let build_target stmts t =
       stmts
   in
   match t' with
-    | Some (`Lib l) -> build_oasis_lib t l
-    | Some (`Exec l) -> build_oasis_exec t l
-    | None ->
-      Maki_log.logf 0 (fun k->k "could not find target `%s`" t);
-      exit 1
+  | Some (`Lib l) -> build_oasis_lib t l
+  | Some (`Exec l) -> build_oasis_exec t l
+  | None ->
+    Maki_log.logf 0 (fun k->k "could not find target `%s`" t);
+    exit 1
 
 let build targets =
   let stmts = Oasis_parser.parse_file "_oasis" in

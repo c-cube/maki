@@ -30,9 +30,9 @@ module ProgressBar = struct
     let n_min, n = aux n nb_sec_minute in
     let print_aux s n = if n <> 0 then (string_of_int n) ^ s else "" in
     (print_aux "d" n_day) ^
-    (print_aux "h" n_hour) ^
-    (print_aux "m" n_min) ^
-    (string_of_int n) ^ "s"
+      (print_aux "h" n_hour) ^
+      (print_aux "m" n_min) ^
+      (string_of_int n) ^ "s"
 
   type t = {
     thread: unit Lwt.t lazy_t;
@@ -139,9 +139,9 @@ module Cache = struct
     let get c x =
       let i = c.hash x mod Array.length c.arr in
       match c.arr.(i) with
-        | Pair (x', y) when c.eq x x' -> y
-        | Pair _
-        | Empty -> raise Not_found
+      | Pair (x', y) when c.eq x x' -> y
+      | Pair _
+      | Empty -> raise Not_found
 
     let set c x y =
       let i = c.hash x mod Array.length c.arr in
