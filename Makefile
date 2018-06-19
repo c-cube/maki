@@ -1,8 +1,8 @@
 
-all: build
-
 build:
 	jbuilder build @install
+
+all: build test
 
 test:
 	jbuilder runtest --no-buffer --force
