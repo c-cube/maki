@@ -500,6 +500,8 @@ module Arg : sig
 
   val make : 'a Hash.t -> 'a -> t
 
+  val of_codec : 'a Codec.t -> 'a -> t
+
   module Infix : sig
     val (@::) : 'a Hash.t -> 'a -> t (** Infix alias to {!make} *)
   end

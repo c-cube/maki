@@ -666,6 +666,7 @@ module Arg = struct
   type t = A : 'a Hash.t * 'a -> t
 
   let make h x = A(h,x)
+  let of_codec c x = make (Hash.of_codec c) x
 
   module Infix = struct
     let (@::) h x = make h x
