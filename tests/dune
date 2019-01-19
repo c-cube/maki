@@ -1,0 +1,7 @@
+(executable
+  (name test_fib)
+  (libraries maki))
+
+(alias
+  (name runtest)
+  (action (run ./test_fib.exe)))

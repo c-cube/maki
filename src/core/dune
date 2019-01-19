@@ -1,0 +1,7 @@
+
+(library
+  (name maki)
+  (public_name maki)
+  (flags :standard -safe-string -w -4-32-44)
+  (libraries lwt.unix sha bencode result threads))
+
