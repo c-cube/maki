@@ -8,7 +8,8 @@ env:
   - PINS="maki:."
   - DISTRO="ubuntu-16.04"
   matrix:
-  - PACKAGE="maki" OCAML_VERSION="4.03.0" EXTRA_DEPS="yojson"
-  - PACKAGE="maki" OCAML_VERSION="4.04.2" EXTRA_DEPS="yojson"
-  - PACKAGE="maki" OCAML_VERSION="4.05.0" EXTRA_DEPS="yojson"
-  - PACKAGE="maki" OCAML_VERSION="4.06.0" EXTRA_DEPS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.03" EXTRA_DEPS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.04" EXTRA_DEPS="yojson"
+    #- PACKAGE="maki" OCAML_VERSION="4.05" EXTRA_DEPS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.06" EXTRA_DEPS="yojson"
+  - PACKAGE="maki" OCAML_VERSION="4.07" EXTRA_DEPS="yojson"
