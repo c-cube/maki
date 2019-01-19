@@ -1,28 +1,30 @@
-opam-version: "1.2"
+opam-version: "2.0"
 name: "maki"
 version: "dev"
+synopsis: "Persistent incremental computations, for repeatable tests and benchmarks"
 author: "Simon Cruanes"
 maintainer: "simon.cruanes.2007@m4x.org"
 build: [
-  ["jbuilder" "build"]
+  ["dune" "build" "@install" "-p" name "-j" jobs]
+  ["dune" "build" "@doc" "-p" name "-j" jobs] {with-doc}
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
-build-doc: [ make "doc" ]
-build-test: [ make "test" ]
 depends: [
-    "jbuilder" {build}
+    "dune" {build}
     "result"
     "lwt"
     "base-unix"
     "bencode"
     "sha"
     "base-threads"
+    "odoc" {with-doc}
+    "ocaml" { >= "4.03" }
 ]
 depopts: [
     "yojson"
 ]
 tags: [ "incremental" "persistent" "memoization" ]
 homepage: "https://github.com/c-cube/maki/"
-doc: "http://cedeela.fr/~simon/software/maki/"
-available: [ocaml-version >= "4.02.0"]
-dev-repo: "https://github.com/c-cube/maki.git"
+doc: "http://c-cube.github.io/maki/"
+dev-repo: "git+https://github.com/c-cube/maki.git"
 bug-reports: "https://github.com/c-cube/maki/issues/"
