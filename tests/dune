@@ -1,6 +1,6 @@
 (executable
   (name test_fib)
-  (libraries maki))
+  (libraries maki.unix))
 
 (alias
   (name runtest)

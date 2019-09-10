@@ -4,5 +4,5 @@
   (public_names maki_gc maki_display)
   (package maki)
   (modes native)
-  (libraries digestif.c maki))
+  (libraries digestif.c maki.unix lwt.unix))
 

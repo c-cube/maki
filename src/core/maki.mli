@@ -181,13 +181,6 @@ module Storage : sig
   (** A dummy storage which does not store any result, thus forcing
       every computation to run. *)
 
-  val default : ?dir:path -> unit -> t Lwt.t
-  (** [default ?dir ()] creates a new default storage (one file per pair)
-      @param dir if provided, set the directory used for storing files
-        if [dir] is not set, then the current directory is used, unless the
-          environment variable "MAKI_DIR" is set
-      @raise Unix.Error in case of error, if it could not create [dir] properly *)
-
   val set_default : t -> unit
   (** Change the storage that is used to evaluate every Maki function *)
 
@@ -231,47 +224,6 @@ module Lifetime : sig
   val one_minute : t
   val one_hour : t
   val one_day : t
-end
-
-(** {2 Values Stored on Disk} *)
-
-module File_ref : sig
-  type t
-  (** An immutable reference to a file, as a path, with a hash of its
-      content.
-      If the file changes on the filesystem, the reference becomes
-      invalid. *)
-
-  val path : t -> path
-  val hash : t -> hash
-
-  val to_string : t -> string
-
-  val make : path -> t or_error Lwt.t
-  (** Make a file ref out of a simple path *)
-
-  val make_exn : path -> t Lwt.t
-  (** @raise Invalid_argument if the path is not valid *)
-
-  val is_valid : t -> bool Lwt.t
-  (** Check if the reference is up-to-date (i.e. the file content
-      did not change) *)
-
-  val codec : t Codec.t
-end
-
-module Program_ref : sig
-  type t
-
-  val find : path -> path or_error Lwt.t
-
-  val make : path -> t or_error Lwt.t
-
-  val as_file : t -> File_ref.t
-
-  val codec : t Codec.t
-
-  val to_string : t -> string
 end
 
 (** {6 Reference to On-Disk Value} *)
@@ -329,12 +281,6 @@ module Hash : sig
   (** [map f hash x] encodes [x] using [f], and then uses [hash]
       to hash [f x]. *)
 
-  val file_ref : File_ref.t t
-  (** How to hash a file ref *)
-
-  val program_ref : Program_ref.t t
-  (** How to hash a program ref *)
-
   val set : 'a t -> 'a list t
   (** [set op] is similar to {!list}, except the order of elements does
       not matter. *)
@@ -356,6 +302,9 @@ module Hash : sig
 
   val of_codec : 'a Codec.t -> 'a t
   (** Hashing by encoding, then hashing the encoded value *)
+
+  val str_ : Sha.ctx -> encoded_value -> Sha.ctx
+  (* FIXME? *)
 end
 
 (** {2 Memoized Functions}
@@ -587,52 +536,27 @@ end
 
 (** {2 Utils} *)
 
-module Util = Maki_utils
-
-val last_mtime : path -> time or_error
-(** Last modification time of the file *)
-
-val sha1 : path -> string or_error Lwt.t
-(** [sha1 f] hashes the file [f] *)
-
 val sha1_of_string : string -> string
 (** hash the given string *)
 
-val abspath : path -> path
-(** Make the path absolute *)
-
-val shell :
-  ?timeout:float -> ?stdin:string ->
-  string ->
-  (string * string * int) or_error Lwt.t
-(** [shell cmd] runs the command [cmd] and
-    returns [stdout, sterr, errcode].
-    @param stdin optional input to the sub-process *)
-
-val shellf :
-  ?timeout:float -> ?stdin:string ->
-  ('a, Format.formatter, unit, (string * string * int) or_error Lwt.t) format4
-  -> 'a
-(** Same as {!shell} but with a format string. Careful with escaping! *)
-
-val read_file : File_ref.t -> string or_error Lwt.t
-(** Read the content of the file *)
-
-val walk :
-  ?filter:(path -> bool) ->
-  ?recursive:bool ->
-  ?which:[`File | `Dir] list ->
-  path ->
-  path list or_error Lwt.t
-(** [walk dir] traverses the directory and yields
-    its content, by {b absolute} path.
-    @param which filters on the type of the content
-    @param recursive if true, walks into subdirectories too
-    @param filter filters the absolute path of objects
-      and yields only these which satisfy the predicate
-*)
-
-(* TODO: globbing, for depending on lists of files easily *)
+module BM : sig
+  val expected_s :
+    encoded_value -> encoded_value -> ('a, encoded_value) result
+  val expected_b : encoded_value -> Bencode.t -> ('a, encoded_value) result
+  val decode_bencode : encoded_value -> (Bencode.t, encoded_value) result
+  val assoc :
+    encoded_value -> (encoded_value * 'a) list -> ('a, encoded_value) result
+  val assoc_or : 'a -> 'b -> ('b * 'a) list -> 'a
+  val as_str : Bencode.t -> (encoded_value, encoded_value) result
+  val as_float : Bencode.t -> (time, encoded_value) result
+  val as_list : Bencode.t -> (Bencode.t list, encoded_value) result
+  val mk_str : encoded_value -> Bencode.t
+  val mk_list : Bencode.t list -> Bencode.t
+  val mk_dict : (encoded_value * Bencode.t) list -> Bencode.t
+  val mk_pair : Bencode.t -> Bencode.t -> Bencode.t
+  val mk_triple : Bencode.t -> Bencode.t -> Bencode.t -> Bencode.t
+  val mk_quad : Bencode.t -> Bencode.t -> Bencode.t -> Bencode.t -> Bencode.t
+end
 
 (** {2 Logging} *)
 

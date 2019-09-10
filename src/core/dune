@@ -2,5 +2,5 @@
 (library
   (name maki)
   (public_name maki)
-  (libraries lwt.unix digestif bencode))
+  (libraries rresult lwt digestif bencode unix))
 
