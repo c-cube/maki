@@ -1,0 +1,4 @@
+(library
+ (name maki_jsoo)
+ (public_name maki.jsoo)
+ (libraries maki jsoo_storage js_of_ocaml))

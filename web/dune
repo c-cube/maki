@@ -1,0 +1,4 @@
+(executable
+ (name client)
+ (libraries maki maki.jsoo js_of_ocaml-lwt lwt)
+ (preprocess (pps js_of_ocaml-ppx lwt_ppx)))

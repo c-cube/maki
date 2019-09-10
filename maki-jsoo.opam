@@ -1,0 +1,15 @@
+opam-version: "2.0"
+name: "maki-jsoo"
+version: "0.0.1"
+maintainer: "Guillaume Huysmans <ghuysmans99@gmail.com>"
+authors: "Guillaume Huysmans <ghuysmans99@gmail.com>"
+homepage: "https://github.com/c-cube/maki/"
+bug-reports: "https://github.com/ghuysmans/maki/issues"
+dev-repo: "git://github.com/ghuysmans/maki/"
+build: [["dune" "build" "-p" name "-j" jobs]]
+synopsis: "Js_of_ocaml backend for Maki"
+depends: [
+  "dune" {build}
+  "maki"
+  "jsoo_storage" {>= "1.0.1"}
+]
