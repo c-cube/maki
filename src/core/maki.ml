@@ -8,7 +8,7 @@ open Lwt.Infix
 module Util = Maki_utils
 module Log = Maki_log
 
-module Sha = Sha1
+module Sha = Digestif.SHA1
 
 module B = Bencode
 module BM = Maki_bencode
@@ -117,7 +117,7 @@ let abspath f =
   then Filename.concat (Sys.getcwd()) f
   else f
 
-let sha1_of_string s = Sha.string s |> Sha.to_hex
+let sha1_of_string s = Sha.digest_string s |> Sha.to_hex
 
 let last_mtime f : time or_error =
   try Ok (last_time_ f)
@@ -564,7 +564,7 @@ module Ref = struct
       codec
       x =
     let data, children = Codec.encode codec x in
-    let key = Sha.string data |> Sha.to_hex in
+    let key = Sha.digest_string data |> Sha.to_hex in
     let record = On_disk_record.make ?lifetime ~children key data in
     let record_s, _ = Codec.encode On_disk_record.codec record in
     Storage.set storage key record_s >>|= fun () ->
@@ -596,18 +596,17 @@ end
 
 module Hash = struct
   module Sha = Sha
-  type 'a t = Sha.ctx -> 'a -> unit
+  type 'a t = Sha.ctx -> 'a -> Sha.ctx
 
   let hash (h:_ t) x =
     let buf = Sha.init() in
-    h buf x;
-    Sha.finalize buf
+    h buf x |> Sha.get
 
   let hash_to_string h x = hash h x |> Sha.to_hex
 
-  let str_ ctx s = Sha.update_string ctx s
+  let str_ ctx s = Sha.feed_string ctx s
 
-  let unit _ _ = ()
+  let unit ctx _ = ctx
   let int ctx x = str_ ctx (string_of_int x)
   let bool ctx x = str_ ctx (string_of_bool x)
   let float ctx x = str_ ctx (string_of_float x)
@@ -615,7 +614,7 @@ module Hash = struct
 
   let map f h ctx x = h ctx (f x)
 
-  let list h ctx l = List.iter (h ctx) l
+  let list h ctx l = List.fold_left h ctx l
   let array h ctx a = list h ctx (Array.to_list a)
 
   let file_ref ctx (f:File_ref.t) =
@@ -628,26 +627,20 @@ module Hash = struct
     file_ref ctx h
 
   let pair h1 h2 ctx (x1,x2) =
-    h1 ctx x1;
-    h2 ctx x2
+    h2 (h1 ctx x1) x2
 
   let triple h1 h2 h3 ctx (x1,x2,x3) =
-    h1 ctx x1;
-    h2 ctx x2;
-    h3 ctx x3
+    h3 (h2 (h1 ctx x1) x2) x3
 
   let quad h1 h2 h3 h4 ctx (x1,x2,x3,x4) =
-    h1 ctx x1;
-    h2 ctx x2;
-    h3 ctx x3;
-    h4 ctx x4
+    h4 (h3 (h2 (h1 ctx x1) x2) x3) x4
 
   (* set: orderless. We compute all hashes, sort, then hash the resulting list *)
   let set h ctx l =
     begin
       List.map (fun x -> hash_to_string h x) l
       |> List.sort String.compare
-      |> List.iter (str_ ctx)
+      |> List.fold_left str_ ctx
     end
 
   let marshal: 'a t = fun ctx x ->
@@ -786,10 +779,9 @@ end
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
 let compute_name (fun_name:string) (args:Arg.t list): hash =
-  let ctx = Sha.init() in
-  Sha.update_string ctx fun_name;
-  List.iter (fun (Arg.A(h,x)) -> h ctx x) args;
-  Sha.finalize ctx |> Sha.to_hex
+  let ctx = Sha.feed_string (Sha.init ()) fun_name in
+  List.fold_left (fun ctx (Arg.A(h,x)) -> h ctx x) ctx args |>
+  Sha.get |> Sha.to_hex
 
 (* map computation_name -> future (serialized) result *)
 type memo_table = (string, encoded_value lazy_t or_error Lwt.t) Hashtbl.t

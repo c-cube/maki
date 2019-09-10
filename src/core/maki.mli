@@ -313,9 +313,9 @@ end
     A cryptographic hash function used to map objects to (probably) unique keys *)
 
 module Hash : sig
-  module Sha : module type of Sha1
+  module Sha : module type of Digestif.SHA1
 
-  type 'a t = Sha.ctx -> 'a -> unit
+  type 'a t = Sha.ctx -> 'a -> Sha.ctx
 
   val unit : unit t
   val int : int t

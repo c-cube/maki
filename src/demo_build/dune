@@ -1,3 +1,3 @@
 (executable
  (name maki_build)
- (libraries maki containers containers.data oasis-parser lwt lwt.ppx))
+ (libraries maki digestif.c containers containers.data oasis-parser lwt lwt.ppx))
