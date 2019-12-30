@@ -12,7 +12,7 @@ build: [
 depends: [
     "dune" {build}
     "result"
-    "lwt"
+    "lwt" { >= "3.2" }
     "base-unix"
     "bencode"
     "sha"
