@@ -3,7 +3,6 @@
 
 (** {1 Maki: Persistent Incremental Computations} *)
 
-open Result
 open Lwt.Infix
 
 module Util = Maki_utils
@@ -19,7 +18,7 @@ module E = Maki_lwt_err
 let (>>>=) = E.(>>=)
 let (>>|=) = E.(>|=)
 
-type 'a or_error = ('a, string) Result.result
+type 'a or_error = ('a, string) result
 type 'a lwt_or_error = 'a or_error Lwt.t
 type 'a printer = Format.formatter -> 'a -> unit
 

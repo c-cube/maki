@@ -2,5 +2,5 @@
 (library
   (name maki)
   (public_name maki)
-  (libraries lwt.unix sha bencode result))
+  (libraries lwt.unix sha bencode))
 
