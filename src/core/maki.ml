@@ -5,53 +5,32 @@
 
 open Lwt.Infix
 
-module Util = Maki_utils
 module Log = Maki_log
 
-module Sha = Sha1
+module Sha = Digestif.SHA1
 
 module B = Bencode
 module BM = Maki_bencode
-module Ca = Maki_utils.Cache
 module E = Maki_lwt_err
 
 let (>>>=) = E.(>>=)
 let (>>|=) = E.(>|=)
 
-type 'a or_error = ('a, string) result
-type 'a lwt_or_error = 'a or_error Lwt.t
 type 'a printer = Format.formatter -> 'a -> unit
 
-let error = Maki_utils.error
-let errorf msg = Maki_utils.errorf msg
+include Maki_err
 
-module Res_ = struct
-  let return x = Ok x
-  let fail e = Error e
-  let (<*>) f x = match f, x with
-    | Ok f, Ok x -> Ok (f x)
-    | Error e, _
-    | _, Error e -> Error e
-  let (>|=) r f = match r with
-    | Ok x -> Ok (f x)
-    | Error e -> Error e
-  let map f x = x >|= f
-  let (>>=) r f = match r with
-    | Ok x -> f x
-    | Error e -> Error e
+exception Exit_map of string
 
-  exception Exit_map of string
-
-  let map_l f l =
-    try
-      let res =
-        List.map
-          (fun x -> match f x with Ok y -> y | Error e -> raise (Exit_map e))
-          l
-      in
-      Ok res
-    with Exit_map msg -> Error msg
-end
+let map_l f l =
+  try
+    let res =
+      List.map
+        (fun x -> match f x with Ok y -> y | Error e -> raise (Exit_map e))
+        l
+    in
+    Ok res
+  with Exit_map msg -> Error msg
 
 (** {2 Controlling Parallelism} *)
 
@@ -89,73 +68,7 @@ type encoded_value = string
 
 (** {2 Utils} *)
 
-(* last time file [f] was modified *)
-let last_time_ f =
-  let s = Unix.stat f in
-  s.Unix.st_mtime
-
-(* number of threads to use in parallel for computing Sha *)
-let sha1_pool_ = Limit.create 20
-
-(* fast sha1 on a file *)
-let sha1_exn f =
-  Limit.acquire sha1_pool_
-    (fun () ->
-       Maki_log.logf 5 (fun k->k "compute sha1 of `%s`" f);
-       Lwt_preemptive.detach (fun () -> Sha.file_fast f |> Sha.to_hex) ())
-
-let sha1 f =
-  Lwt.catch
-    (fun () -> sha1_exn f >|= Res_.return)
-    (fun e ->
-       errorf "error when computing sha1 of `%s`: %s"
-         f (Printexc.to_string e)
-       |> Lwt.return)
-
-let abspath f =
-  if Filename.is_relative f
-  then Filename.concat (Sys.getcwd()) f
-  else f
-
-let sha1_of_string s = Sha.string s |> Sha.to_hex
-
-let last_mtime f : time or_error =
-  try Ok (last_time_ f)
-  with e ->
-    errorf "could not compute `last_mtime %s`: %s" f (Printexc.to_string e)
-
-let errcode_of_status_ =
-  fun (Unix.WEXITED c | Unix.WSIGNALED c | Unix.WSTOPPED c) -> c
-
-let shell ?timeout ?(stdin="") cmd0 =
-  let cmd = "sh", [|"sh"; "-c"; cmd0|] in
-  Lwt.catch
-    (fun () ->
-       Lwt_process.with_process_full ?timeout cmd
-         (fun p ->
-            Lwt_io.write p#stdin stdin >>= fun () ->
-            Lwt_io.flush p#stdin >>= fun () ->
-            let stdout = Lwt_io.read p#stdout
-            and stderr = Lwt_io.read p#stderr
-            and errcode = p#status
-            and close_in = Lwt_io.close p#stdin in
-            stdout >>= fun o ->
-            stderr >>= fun e ->
-            errcode >|= errcode_of_status_ >>= fun c ->
-            close_in >>= fun _ ->
-            E.return (o, e, c)))
-    (fun e ->
-       errorf "error when calling `%s`: %s" cmd0 (Printexc.to_string e)
-       |> Lwt.return)
-
-let shellf ?timeout ?stdin cmd =
-  let buf = Buffer.create 64 in
-  let fmt = Format.formatter_of_buffer buf in
-  Format.kfprintf
-    (fun _ ->
-       Format.pp_print_flush fmt ();
-       shell ?timeout ?stdin (Buffer.contents buf))
-    fmt cmd
+let sha1_of_string s = Sha.digest_string s |> Sha.to_hex
 
 (** {2 Encoder/Decoder} *)
 
@@ -188,7 +101,7 @@ module Codec = struct
         let b, children = encode x in
         Bencode.encode_to_string b, children)
       ~decode:(fun s ->
-        Res_.(BM.decode_bencode s >>= decode))
+        Rresult.(BM.decode_bencode s >>= decode))
 
   let make_leaf_bencode ~encode ~decode descr =
     make_bencode ~encode:(fun x -> encode x, []) ~decode descr
@@ -239,147 +152,12 @@ module Codec = struct
         | Ok x -> let s, deps = encode c x in "1" ^ s, deps
         | Error y -> "0" ^ y, [])
       ~decode:(fun s ->
-        let open Res_ in
+        let open Rresult in
         if s<>"" && s.[0] = '0'
-        then decode c (String.sub s 1 (String.length s-1)) >|= Res_.return
+        then decode c (String.sub s 1 (String.length s-1)) >>| R.return
         else if s<>"" && s.[0] = '1'
-        then String.sub s 1 (String.length s-1) |> Res_.fail
+        then String.sub s 1 (String.length s-1) |> R.fail
         else errorf "expected %s, got `%s`" name s)
-end
-
-(** {2 References to Files} *)
-
-module File_ref : sig
-  type t
-
-  val path : t -> path
-  val hash : t -> hash
-  val to_string : t -> string
-
-  val make : path -> t or_error Lwt.t
-  val make_exn : path -> t Lwt.t
-  val is_valid : t -> bool Lwt.t
-
-  val of_bencode : Bencode.t -> t or_error
-  val to_bencode : t -> Bencode.t
-  val codec : t Codec.t
-end = struct
-  type t = {
-    f_path: path;
-    f_hash: hash;
-  }
-
-  let path f = f.f_path
-  let hash f = f.f_hash
-
-  let to_string f: string =
-    Printf.sprintf "{path=`%s`, hash=%s}" (path f) (hash f)
-
-  let of_bencode = function
-    | B.Dict l ->
-      let open Res_ in
-      BM.assoc "path" l >>= BM.as_str >>= fun f_path ->
-      BM.assoc "hash" l >>= BM.as_str >>= fun f_hash ->
-      Ok {f_path; f_hash;}
-    | b -> BM.expected_b "file_state" b
-
-  let to_bencode fs =
-    B.Dict
-      [ "path", B.String fs.f_path;
-        "hash", B.String fs.f_hash;
-      ]
-
-
-  let codec =
-    Codec.make_leaf_bencode ~encode:to_bencode ~decode:of_bencode "file_stat"
-
-  (* cache for files: maps file name to hash + last modif *)
-  type file_cache = (path, time * t or_error Lwt.t) Ca.t
-
-  let file_cache_ : file_cache = Ca.replacing 512
-
-  let make f : t or_error Lwt.t =
-    if not (Sys.file_exists f) then (
-      errorf "file `%s` not found" f |> Lwt.return
-    ) else (
-      let last = last_time_ f in
-      match Ca.get file_cache_ f with
-      | Some (time,fs) when time >= last -> fs (* cache hit *)
-      | _ ->
-        let fut =
-          sha1 f >>|= fun f_hash ->
-          { f_path=f; f_hash;}
-        in
-        Ca.set file_cache_ f (last,fut);
-        fut
-    )
-
-  let make_exn f : _ Lwt.t =
-    make f >>= function
-    | Ok x -> Lwt.return x
-    | Error e -> Lwt.fail (Invalid_argument e)
-
-  (* check if [f] is a [file_state] that doesn't correspond to the actual
-     content of the disk *)
-  let is_valid (f:t): bool Lwt.t =
-    Maki_log.logf 5 (fun k->k "check if file %s is up-to-date..." (to_string f));
-    (* compare [fs] with actual current file state *)
-    make (path f) >>= fun res ->
-    begin match res with
-      | Error _ -> Lwt.return_true (* file not present, etc. *)
-      | Ok f' ->
-        let res =
-          path f = path f' &&
-          hash f = hash f'
-        in
-        Maki_log.logf 5 (fun k->k "file %s up-to-date? %B" (to_string f) res);
-        Lwt.return res
-    end
-end
-
-module Program_ref : sig
-  type t
-  val find : path -> path or_error Lwt.t
-  val make : path -> t or_error Lwt.t
-  val as_file : t -> File_ref.t
-  val codec : t Codec.t
-  val to_string : t -> string
-end = struct
-  type t = File_ref.t
-
-  let as_file (p:t): File_ref.t = p
-  let codec = File_ref.codec
-
-  (* program name -> path *)
-  let path_tbl_ : (string, string or_error Lwt.t) Ca.t = Ca.replacing 64
-
-  let path_pool_ = Lwt_pool.create 100 (fun _ -> Lwt.return_unit)
-
-  (* turn [f], a potentially relative path to a program, into an absolute path *)
-  let find (f:path) : path or_error Lwt.t =
-    if Filename.is_relative f && Filename.is_implicit f
-    then match Ca.get path_tbl_ f with
-      | Some r -> r
-      | None ->
-        let fut =
-          Lwt_pool.use path_pool_
-            (fun _ ->
-               Maki_log.logf 5 (fun k->k "invoke `which` on `%s`" f);
-               let p = Lwt_process.open_process_in ("", [|"which"; f|]) in
-               Lwt_io.read p#stdout >>= fun out ->
-               p#status >|= errcode_of_status_ >|= fun errcode ->
-               if errcode=0
-               then Ok (String.trim out)
-               else errorf "program `%s` not found in path" f)
-        in
-        (* cache *)
-        Ca.set path_tbl_ f fut;
-        fut
-    else Lwt.return (Ok f)
-
-  let make (f:path) = find f >>>= File_ref.make
-
-  let to_string = File_ref.to_string
 end
 
 (** {2 Time Utils} *)
@@ -528,7 +306,7 @@ end = struct
 
   (* [s] is a serialized cached value, turn it into a [cache_value] *)
   let decode (b:Bencode.t) : t or_error =
-    let open Res_ in
+    let open Rresult in
     begin match b with
       | B.Dict l ->
         BM.assoc "gc_info" l >>= GC_info.of_bencode >>= fun gc_info ->
@@ -536,7 +314,7 @@ end = struct
         BM.assoc_or (B.List []) "children" l
         |> BM.as_list >>= map_l BM.as_str >>= fun children ->
         BM.assoc "key" l >>= BM.as_str >>= fun key ->
-        return {data; gc_info; key; children; }
+        R.return {data; gc_info; key; children; }
       | b ->
         errorf "expected on_disk_record, got `%s`"
           (Bencode.encode_to_string b)
@@ -564,7 +342,7 @@ module Ref = struct
       codec
       x =
     let data, children = Codec.encode codec x in
-    let key = Sha.string data |> Sha.to_hex in
+    let key = Sha.digest_string data |> Sha.to_hex in
     let record = On_disk_record.make ?lifetime ~children key data in
     let record_s, _ = Codec.encode On_disk_record.codec record in
     Storage.set storage key record_s >>|= fun () ->
@@ -589,25 +367,24 @@ module Ref = struct
     begin match s with
       | None -> Ok None
       | Some s ->
-        let open Res_ in
-        Codec.decode codec s >|= fun x -> Some x
+        let open Rresult in
+        Codec.decode codec s >>| fun x -> Some x
     end |> Lwt.return
 end
 
 module Hash = struct
   module Sha = Sha
-  type 'a t = Sha.ctx -> 'a -> unit
+  type 'a t = Sha.ctx -> 'a -> Sha.ctx
 
   let hash (h:_ t) x =
     let buf = Sha.init() in
-    h buf x;
-    Sha.finalize buf
+    h buf x |> Sha.get
 
   let hash_to_string h x = hash h x |> Sha.to_hex
 
-  let str_ ctx s = Sha.update_string ctx s
+  let str_ ctx s = Sha.feed_string ctx s
 
-  let unit _ _ = ()
+  let unit ctx _ = ctx
   let int ctx x = str_ ctx (string_of_int x)
   let bool ctx x = str_ ctx (string_of_bool x)
   let float ctx x = str_ ctx (string_of_float x)
@@ -615,39 +392,24 @@ module Hash = struct
 
   let map f h ctx x = h ctx (f x)
 
-  let list h ctx l = List.iter (h ctx) l
+  let list h ctx l = List.fold_left h ctx l
   let array h ctx a = list h ctx (Array.to_list a)
 
-  let file_ref ctx (f:File_ref.t) =
-    let h = File_ref.hash f in
-    str_ ctx (File_ref.path f);
-    str_ ctx h
-
-  let program_ref ctx (p:Program_ref.t) =
-    let h = Program_ref.as_file p in
-    file_ref ctx h
-
   let pair h1 h2 ctx (x1,x2) =
-    h1 ctx x1;
-    h2 ctx x2
+    h2 (h1 ctx x1) x2
 
   let triple h1 h2 h3 ctx (x1,x2,x3) =
-    h1 ctx x1;
-    h2 ctx x2;
-    h3 ctx x3
+    h3 (h2 (h1 ctx x1) x2) x3
 
   let quad h1 h2 h3 h4 ctx (x1,x2,x3,x4) =
-    h1 ctx x1;
-    h2 ctx x2;
-    h3 ctx x3;
-    h4 ctx x4
+    h4 (h3 (h2 (h1 ctx x1) x2) x3) x4
 
   (* set: orderless. We compute all hashes, sort, then hash the resulting list *)
   let set h ctx l =
     begin
       List.map (fun x -> hash_to_string h x) l
       |> List.sort String.compare
-      |> List.iter (str_ ctx)
+      |> List.fold_left str_ ctx
     end
 
   let marshal: 'a t = fun ctx x ->
@@ -720,14 +482,14 @@ end = struct
 
   (* [s] is a serialized result, turn it into a result *)
   let decode (codec:'a Codec.t) (b:Bencode.t) : 'a t or_error =
-    let open Res_ in
+    let open Rresult in
     begin match b with
       | B.Dict l ->
         BM.assoc "ref" l >>= BM.as_str >>= fun hash ->
         let result : _ Ref.t = codec, hash in
         BM.assoc "name" l >>= BM.as_str >>= fun name ->
         BM.assoc_or (B.List []) "tags" l
-        |> BM.as_list >>= map_l BM.as_str >|= fun tags ->
+        |> BM.as_list >>= map_l BM.as_str >>| fun tags ->
         make ~tags name result
       | _ ->
         errorf "expected cache_value, got `%s`" (Bencode.encode_to_string b)
@@ -773,7 +535,7 @@ end = struct
         ) else E.return_unit
       end >>>= fun () ->
       let s = On_disk_record.data record in
-      Codec.decode (codec c) s |> Res_.map (fun x-> Some x) |> Lwt.return
+      Codec.decode (codec c) s |> Rresult.R.map (fun x-> Some x) |> Lwt.return
 
   let find ?storage ?lifetime k c =
     get ?storage ?lifetime k c
@@ -786,10 +548,9 @@ end
 (* compute the hash of the result of computing the application of
    the function named [fun_name] on dependencies [l] *)
 let compute_name (fun_name:string) (args:Arg.t list): hash =
-  let ctx = Sha.init() in
-  Sha.update_string ctx fun_name;
-  List.iter (fun (Arg.A(h,x)) -> h ctx x) args;
-  Sha.finalize ctx |> Sha.to_hex
+  let ctx = Sha.feed_string (Sha.init ()) fun_name in
+  List.fold_left (fun ctx (Arg.A(h,x)) -> h ctx x) ctx args |>
+  Sha.get |> Sha.to_hex
 
 (* map computation_name -> future (serialized) result *)
 type memo_table = (string, encoded_value lazy_t or_error Lwt.t) Hashtbl.t
@@ -911,7 +672,7 @@ let call
 
 let call_pure ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning f =
   call ?bypass ?storage ?lifetime ?limit ?tags ~name ~args ~returning
-    (fun () -> f () >|= Res_.return)
+    (fun () -> f () >|= Rresult.R.return)
 
 module Fun = struct
   type (_, _, _) t =
@@ -1056,49 +817,5 @@ module GC = struct
         Lwt.return (Ok stats)
     end
 end
-
-let read_file (f:File_ref.t) : string or_error Lwt.t =
-  let s = File_ref.path f in
-  Lwt.catch
-    (fun () ->
-       Lwt_io.with_file ~mode:Lwt_io.Input s
-         (fun ic -> Lwt_io.read ic |> E.lift_ok))
-    (fun e ->
-       E.fail (Printexc.to_string e))
-
-let walk
-    ?(filter=fun _ -> true)
-    ?(recursive=true)
-    ?(which=[`File;`Dir])
-    dir =
-  let dir = abspath dir in
-  let rec walk ~rec_ acc file =
-    if not (Sys.file_exists file) then acc
-    else if not (filter file) then acc
-    else (
-      (* yield this particular file? *)
-      let acc =
-        if filter file &&
-           ((Sys.is_directory file &&
-             List.mem `Dir which) ||
-            (not (Sys.is_directory file) &&
-             List.mem `File which))
-        then file :: acc
-        else acc
-      in
-      if Sys.is_directory file then (
-        (* try to list the directory *)
-        let arr = try Sys.readdir file with Sys_error _ -> [||] in
-        Array.fold_left
-          (fun acc sub ->
-             (* abspath *)
-             let sub = Filename.concat file sub in
-             walk ~rec_:(rec_ && recursive) acc sub)
-          acc arr
-      ) else acc
-    )
-  in
-  try walk ~rec_:true [] dir |> E.return
-  with e -> E.fail (Printexc.to_string e)
 
 include E.Infix

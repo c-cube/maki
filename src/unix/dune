@@ -1,0 +1,6 @@
+
+(library
+  (name maki_unix)
+  (public_name maki.unix)
+  (libraries maki sha lwt.unix unix))
+
